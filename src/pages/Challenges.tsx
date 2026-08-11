@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Trophy, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { syncExpiredChallenges } from '../lib/challenges'
 import type { Challenge } from '../types'
 import { ChallengeCard } from '../components/challenges/ChallengeCard'
 import { CreateChallengeModal } from '../components/challenges/CreateChallengeModal'
@@ -13,6 +14,7 @@ type Filter = 'all' | 'active' | 'completed' | 'failed'
 
 export function Challenges() {
   const { user } = useAuth()
+  const qc = useQueryClient()
   const [filter, setFilter] = useState<Filter>('active')
   const [showCreate, setShowCreate] = useState(false)
 
@@ -20,6 +22,8 @@ export function Challenges() {
     queryKey: ['challenges', user?.id, 'all'],
     enabled: !!user,
     queryFn: async () => {
+      await syncExpiredChallenges(user!.id)
+
       const { data } = await supabase
         .from('challenges')
         .select('*')
@@ -40,6 +44,21 @@ export function Challenges() {
       }))
     },
   })
+
+  const deleteChallenge = useMutation({
+    mutationFn: async (challengeId: string) => {
+      await supabase.from('challenges').delete().eq('id', challengeId)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['challenges'] })
+    },
+  })
+
+  const handleDelete = (challenge: Challenge) => {
+    if (confirm(`Delete "${challenge.title}"? This can't be undone.`)) {
+      deleteChallenge.mutate(challenge.id)
+    }
+  }
 
   const filtered = challenges.filter((c) => filter === 'all' || c.status === filter)
 
@@ -106,7 +125,14 @@ export function Challenges() {
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map((c) => <ChallengeCard key={c.id} challenge={c} />)}
+          {filtered.map((c) => (
+            <ChallengeCard
+              key={c.id}
+              challenge={c}
+              onDelete={handleDelete}
+              deleting={deleteChallenge.isPending && deleteChallenge.variables === c.id}
+            />
+          ))}
         </div>
       )}
 

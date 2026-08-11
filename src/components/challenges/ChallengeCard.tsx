@@ -1,5 +1,4 @@
-import { Link } from 'react-router-dom'
-import { Trophy, Calendar, BookOpen } from 'lucide-react'
+import { Trophy, Calendar, BookOpen, Trash2 } from 'lucide-react'
 import type { Challenge } from '../../types'
 import { Badge } from '../ui/Badge'
 
@@ -18,16 +17,19 @@ const STATUS_VARIANT = {
   failed: 'danger' as const,
 }
 
-export function ChallengeCard({ challenge }: { challenge: Challenge }) {
+interface ChallengeCardProps {
+  challenge: Challenge
+  onDelete?: (challenge: Challenge) => void
+  deleting?: boolean
+}
+
+export function ChallengeCard({ challenge, onDelete, deleting }: ChallengeCardProps) {
   const completed = challenge.books_completed ?? 0
   const pct = Math.min(100, (completed / challenge.target_count) * 100)
   const remaining = daysLeft(challenge.end_date)
 
   return (
-    <Link
-      to={`/challenges/${challenge.id}`}
-      className="block bg-white rounded-xl border border-parchment-200 hover:border-primary-300 hover:shadow-md transition-all p-5"
-    >
+    <div className="bg-white rounded-xl border border-parchment-200 hover:border-primary-300 hover:shadow-md transition-all p-5">
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex items-center gap-2.5">
           <div className="p-2 bg-amber-50 rounded-lg">
@@ -40,9 +42,21 @@ export function ChallengeCard({ challenge }: { challenge: Challenge }) {
             )}
           </div>
         </div>
-        <Badge variant={STATUS_VARIANT[challenge.status]}>
-          {challenge.status.charAt(0).toUpperCase() + challenge.status.slice(1)}
-        </Badge>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Badge variant={STATUS_VARIANT[challenge.status]}>
+            {challenge.status.charAt(0).toUpperCase() + challenge.status.slice(1)}
+          </Badge>
+          {onDelete && (
+            <button
+              onClick={() => onDelete(challenge)}
+              disabled={deleting}
+              title="Delete challenge"
+              className="p-1 rounded text-gray-300 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="mb-3">
@@ -72,6 +86,6 @@ export function ChallengeCard({ challenge }: { challenge: Challenge }) {
           </span>
         )}
       </div>
-    </Link>
+    </div>
   )
 }

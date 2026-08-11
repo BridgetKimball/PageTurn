@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { User, Mail, Edit3 } from 'lucide-react'
+import { User, Mail, Edit3, AlertTriangle } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { Input } from '../components/ui/Input'
 import { Button } from '../components/ui/Button'
+import { DeleteAccountModal } from '../components/auth/DeleteAccountModal'
 
 export function Profile() {
   const { profile, updateProfile } = useAuth()
@@ -10,6 +11,7 @@ export function Profile() {
   const [displayName, setDisplayName] = useState(profile?.display_name ?? '')
   const [bio, setBio] = useState(profile?.bio ?? '')
   const [saving, setSaving] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
 
   async function handleSave() {
     setSaving(true)
@@ -81,6 +83,21 @@ export function Profile() {
             : '—'}
         </p>
       </div>
+
+      <div className="bg-white rounded-xl border border-red-200 p-6">
+        <h3 className="font-semibold text-red-700 mb-1 flex items-center gap-2">
+          <AlertTriangle size={16} /> Danger Zone
+        </h3>
+        <p className="text-sm text-gray-500 mb-4">
+          Permanently delete your account and everything in it — books, shelves, reading sessions, and challenges.
+          This can't be undone.
+        </p>
+        <Button variant="danger" size="sm" onClick={() => setShowDeleteModal(true)}>
+          Delete Account
+        </Button>
+      </div>
+
+      <DeleteAccountModal open={showDeleteModal} onClose={() => setShowDeleteModal(false)} />
     </div>
   )
 }

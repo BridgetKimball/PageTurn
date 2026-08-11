@@ -353,7 +353,13 @@ export function BookDetail() {
         </div>
       </Modal>
 
-      <AddToShelfModal book={book} open={showAddModal} onClose={() => setShowAddModal(false)} />
+      <AddToShelfModal
+        book={book}
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        existingUserBook={userBook}
+        initialShelfIds={bookShelves.map((s) => s.id)}
+      />
     </div>
   )
 }

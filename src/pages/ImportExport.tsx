@@ -1,8 +1,9 @@
 import { useState, useRef } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Download, Upload, FileText, AlertCircle } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Download, Upload, FileText, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { importGoodreadsCsv, type ImportSummary } from '../lib/goodreadsImport'
 import type { UserBook } from '../types'
 import { Button } from '../components/ui/Button'
 
@@ -27,9 +28,11 @@ function toCSV(rows: Record<string, string | number | null>[]): string {
 
 export function ImportExport() {
   const { user } = useAuth()
+  const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
   const [importStatus, setImportStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [importMessage, setImportMessage] = useState('')
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null)
   const [exportLoading, setExportLoading] = useState(false)
 
   const { data: userBooks = [] } = useQuery<UserBook[]>({
@@ -73,36 +76,28 @@ export function ImportExport() {
 
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    if (!file) return
+    if (!file || !user) return
     setImportStatus('loading')
-    setImportMessage('Parsing file…')
+    setImportMessage('Reading and importing your library…')
+    setImportSummary(null)
 
     try {
       const text = await file.text()
-      const lines = text.split('\n').filter((l) => l.trim())
-      if (lines.length < 2) throw new Error('File appears empty.')
-
-      const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase())
-      const titleIdx = headers.indexOf('title')
-      const authorIdx = headers.findIndex((h) => h.includes('author'))
-      const shelvesIdx = headers.findIndex((h) => h.includes('shelf') || h.includes('status') || h.includes('bookshelves'))
-
-      if (titleIdx === -1) throw new Error('Could not find a "title" column.')
-
-      const parsed = lines.slice(1).map((line) => {
-        const cols = line.match(/("(?:[^"]|"")*"|[^,]*)/g)?.map((c) => c.replace(/^"|"$/g, '').replace(/""/g, '"')) ?? []
-        return {
-          title: cols[titleIdx]?.trim() ?? '',
-          author: authorIdx >= 0 ? cols[authorIdx]?.trim() ?? '' : '',
-          shelf: shelvesIdx >= 0 ? cols[shelvesIdx]?.trim() ?? '' : '',
-        }
-      }).filter((r) => r.title)
-
-      setImportMessage(`Found ${parsed.length} books. Goodreads import is being prepared — full import coming in a future update.`)
-      setImportStatus('success')
+      const summary = await importGoodreadsCsv(user.id, text)
+      setImportSummary(summary)
+      setImportMessage(
+        `Imported ${summary.imported} of ${summary.totalRows} books` +
+        (summary.shelvesCreated ? `, created ${summary.shelvesCreated} new shelf${summary.shelvesCreated === 1 ? '' : 'es'}` : '') +
+        '.'
+      )
+      setImportStatus(summary.errors.length && summary.imported === 0 ? 'error' : 'success')
+      qc.invalidateQueries({ queryKey: ['user_books'] })
+      qc.invalidateQueries({ queryKey: ['shelves'] })
+      qc.invalidateQueries({ queryKey: ['shelf_books'] })
+      qc.invalidateQueries({ queryKey: ['challenges'] })
     } catch (err) {
       setImportStatus('error')
-      setImportMessage(err instanceof Error ? err.message : 'Failed to parse file.')
+      setImportMessage(err instanceof Error ? err.message : 'Failed to import file.')
     }
 
     if (fileRef.current) fileRef.current.value = ''
@@ -180,17 +175,37 @@ export function ImportExport() {
                 ${importStatus === 'loading' ? 'bg-blue-50 text-blue-700' : ''}`}
               >
                 {importStatus === 'error' && <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />}
+                {importStatus === 'success' && <CheckCircle2 size={15} className="flex-shrink-0 mt-0.5" />}
                 {importMessage}
               </div>
+            )}
+
+            {importSummary && importSummary.errors.length > 0 && (
+              <div className="mt-2 p-3 rounded-lg bg-amber-50 text-amber-800 text-xs space-y-1 max-h-40 overflow-y-auto">
+                <p className="font-medium">{importSummary.errors.length} issue{importSummary.errors.length === 1 ? '' : 's'}:</p>
+                {importSummary.errors.slice(0, 20).map((err, i) => <p key={i}>• {err}</p>)}
+                {importSummary.errors.length > 20 && <p>…and {importSummary.errors.length - 20} more.</p>}
+              </div>
+            )}
+
+            {importSummary && (
+              <p className="mt-2 text-xs text-gray-400">
+                Note: Goodreads exports don't include genre/category data, so imported books won't automatically
+                match genre-filtered reading challenges — you can still add them to shelves manually.
+              </p>
             )}
           </div>
         </div>
       </div>
 
-      {/* Future */}
-      <div className="bg-parchment-50 rounded-xl border border-parchment-200 p-5 text-center">
+      {/* What gets imported */}
+      <div className="bg-parchment-50 rounded-xl border border-parchment-200 p-5">
+        <p className="text-sm font-medium text-gray-700 mb-2">What's imported</p>
         <p className="text-sm text-gray-500">
-          Full Goodreads import (preserving shelves, ratings, and reviews) is planned for a future update.
+          Title, authors, ISBN, page count, your rating, review, read/currently-reading/want-to-read status,
+          date finished, and any custom Goodreads shelves (recreated here as PageTurn shelves). Covers and
+          genre tags aren't included in Goodreads' export format, so those stay blank until you look the book
+          up again via Search.
         </p>
       </div>
     </div>

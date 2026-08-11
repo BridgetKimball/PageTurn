@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react'
-import { Search as SearchIcon, X } from 'lucide-react'
+import { useState, useCallback, useEffect } from 'react'
+import { Search as SearchIcon, X, AlertCircle } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { searchBooks } from '../lib/googleBooks'
 import type { Book } from '../types'
@@ -8,10 +8,10 @@ import { AddToShelfModal } from '../components/books/AddToShelfModal'
 
 function useDebounce<T>(value: T, delay = 400): T {
   const [debounced, setDebounced] = useState(value)
-  useState(() => {
+  useEffect(() => {
     const t = setTimeout(() => setDebounced(value), delay)
     return () => clearTimeout(t)
-  })
+  }, [value, delay])
   return debounced
 }
 
@@ -20,11 +20,12 @@ export function Search() {
   const [selectedBook, setSelectedBook] = useState<Book | null>(null)
   const debouncedQuery = useDebounce(query, 400)
 
-  const { data: results = [], isFetching } = useQuery({
+  const { data: results = [], isFetching, isError, error } = useQuery({
     queryKey: ['book-search', debouncedQuery],
     enabled: debouncedQuery.length >= 2,
     queryFn: () => searchBooks(debouncedQuery),
     staleTime: 1000 * 60 * 5,
+    retry: 1,
   })
 
   const clear = useCallback(() => setQuery(''), [])
@@ -60,7 +61,21 @@ export function Search() {
         </div>
       )}
 
-      {!isFetching && results.length === 0 && debouncedQuery.length >= 2 && (
+      {isError && (
+        <div className="text-center py-16 text-red-500">
+          <AlertCircle size={40} className="mx-auto mb-3 opacity-60" />
+          <p className="font-medium">Search failed</p>
+          <p className="text-sm mt-1 text-red-400 max-w-md mx-auto">
+            {error instanceof Error ? error.message : 'Something went wrong contacting Google Books.'}
+          </p>
+          <p className="text-xs mt-3 text-gray-400 max-w-md mx-auto">
+            If this mentions a quota or rate limit, Google's free anonymous search limit has been hit.
+            Adding a Google Books API key (VITE_GOOGLE_BOOKS_API_KEY) raises that limit substantially — see docs/SETUP.md.
+          </p>
+        </div>
+      )}
+
+      {!isFetching && !isError && results.length === 0 && debouncedQuery.length >= 2 && (
         <div className="text-center py-16 text-gray-400">
           <SearchIcon size={40} className="mx-auto mb-3 opacity-40" />
           <p className="font-medium">No results for "{debouncedQuery}"</p>

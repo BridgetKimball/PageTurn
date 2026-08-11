@@ -1,17 +1,23 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, Plus } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
-import type { Book, Shelf, ReadingStatus } from '../../types'
+import { syncChallengeLinksForUserBook } from '../../lib/challenges'
+import type { Book, Shelf, ReadingStatus, UserBook } from '../../types'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { StarRating } from '../ui/StarRating'
+import { CreateShelfModal } from '../shelves/CreateShelfModal'
 
 interface AddToShelfModalProps {
   book: Book
   open: boolean
   onClose: () => void
+  /** Pass the existing entry when editing, so status/rating/page pre-populate instead of resetting to defaults. */
+  existingUserBook?: UserBook | null
+  /** Ids of shelves this book is already on, so they show pre-checked when editing. */
+  initialShelfIds?: string[]
 }
 
 const STATUS_OPTIONS: { value: ReadingStatus; label: string }[] = [
@@ -20,13 +26,25 @@ const STATUS_OPTIONS: { value: ReadingStatus; label: string }[] = [
   { value: 'read', label: 'Read' },
 ]
 
-export function AddToShelfModal({ book, open, onClose }: AddToShelfModalProps) {
+export function AddToShelfModal({ book, open, onClose, existingUserBook, initialShelfIds }: AddToShelfModalProps) {
   const { user } = useAuth()
   const qc = useQueryClient()
   const [status, setStatus] = useState<ReadingStatus>('want_to_read')
   const [rating, setRating] = useState<number | null>(null)
   const [currentPage, setCurrentPage] = useState('')
   const [selectedShelves, setSelectedShelves] = useState<string[]>([])
+  const [showCreateShelf, setShowCreateShelf] = useState(false)
+
+  // Re-sync form state whenever the modal opens, so editing an existing
+  // entry doesn't silently reset it to these defaults on save.
+  useEffect(() => {
+    if (!open) return
+    setStatus(existingUserBook?.status ?? 'want_to_read')
+    setRating(existingUserBook?.rating ?? null)
+    setCurrentPage(existingUserBook?.current_page ? String(existingUserBook.current_page) : '')
+    setSelectedShelves(initialShelfIds ?? [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, existingUserBook?.id])
 
   const { data: shelves = [] } = useQuery<Shelf[]>({
     queryKey: ['shelves', user?.id],
@@ -61,6 +79,16 @@ export function AddToShelfModal({ book, open, onClose }: AddToShelfModalProps) {
         .single()
       if (!storedBook) throw new Error('Book not saved')
 
+      const today = new Date().toISOString().split('T')[0]
+      const wasReading = existingUserBook?.status === 'reading'
+      const wasRead = existingUserBook?.status === 'read'
+      const dateStarted = status === 'reading' || status === 'read'
+        ? (wasReading || wasRead ? existingUserBook?.date_started ?? today : today)
+        : null
+      const dateFinished = status === 'read'
+        ? (wasRead ? existingUserBook?.date_finished ?? today : today)
+        : null
+
       // Upsert user_book
       const { data: ub } = await supabase.from('user_books').upsert({
         user_id: user!.id,
@@ -68,8 +96,8 @@ export function AddToShelfModal({ book, open, onClose }: AddToShelfModalProps) {
         status,
         rating,
         current_page: currentPage ? parseInt(currentPage) : 0,
-        date_started: status === 'reading' ? new Date().toISOString().split('T')[0] : null,
-        date_finished: status === 'read' ? new Date().toISOString().split('T')[0] : null,
+        date_started: dateStarted,
+        date_finished: dateFinished,
       }, { onConflict: 'user_id,book_id' }).select('id').single()
 
       // Add to shelves
@@ -83,11 +111,23 @@ export function AddToShelfModal({ book, open, onClose }: AddToShelfModalProps) {
           { onConflict: 'shelf_id,book_id' }
         )
       }
+
+      if (ub) {
+        await syncChallengeLinksForUserBook({
+          userId: user!.id,
+          userBookId: ub.id,
+          status,
+          dateFinished,
+          genres: book.genres,
+        })
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['user_books'] })
       qc.invalidateQueries({ queryKey: ['shelves'] })
       qc.invalidateQueries({ queryKey: ['shelf_books'] })
+      qc.invalidateQueries({ queryKey: ['challenges'] })
+      qc.invalidateQueries({ queryKey: ['user_book'] })
       onClose()
     },
   })
@@ -167,7 +207,7 @@ export function AddToShelfModal({ book, open, onClose }: AddToShelfModalProps) {
             ))}
           </div>
           <button
-            onClick={() => {/* handled by parent */}}
+            onClick={() => setShowCreateShelf(true)}
             className="mt-2 flex items-center gap-1.5 text-xs text-primary-600 hover:text-primary-800 transition-colors"
           >
             <Plus size={13} /> New shelf
@@ -182,6 +222,8 @@ export function AddToShelfModal({ book, open, onClose }: AddToShelfModalProps) {
           Save to Library
         </Button>
       </div>
+
+      <CreateShelfModal open={showCreateShelf} onClose={() => setShowCreateShelf(false)} />
     </Modal>
   )
 }

@@ -12,6 +12,7 @@ interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
   updateProfile: (updates: Partial<Pick<Profile, 'display_name' | 'bio' | 'avatar_url'>>) => Promise<void>
+  deleteAccount: () => Promise<{ fullyDeleted: boolean; error: string | null }>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -94,8 +95,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data) setProfile(data)
   }
 
+  async function wipeOwnedData(userId: string) {
+    // Leaf tables first — safe regardless of whether FK cascades are configured.
+    await supabase.from('challenge_books').delete().eq('user_id', userId)
+    await supabase.from('shelf_books').delete().eq('user_id', userId)
+    await supabase.from('reading_sessions').delete().eq('user_id', userId)
+    await supabase.from('challenges').delete().eq('user_id', userId)
+    await supabase.from('shelves').delete().eq('user_id', userId)
+    await supabase.from('user_books').delete().eq('user_id', userId)
+    await supabase.from('profiles').delete().eq('id', userId)
+  }
+
+  async function deleteAccount(): Promise<{ fullyDeleted: boolean; error: string | null }> {
+    if (!user) return { fullyDeleted: false, error: 'Not signed in.' }
+    const userId = user.id
+
+    // Try the Edge Function first — it deletes the actual auth user, which
+    // cascades to everything else. Falls back to a manual data wipe if the
+    // function isn't deployed (this app has no server beyond Supabase, so
+    // that deployment is a manual step — see docs/DEPLOYMENT.md).
+    try {
+      const { error } = await supabase.functions.invoke('delete-account')
+      if (!error) {
+        await supabase.auth.signOut()
+        return { fullyDeleted: true, error: null }
+      }
+    } catch {
+      // fall through to manual wipe
+    }
+
+    try {
+      await wipeOwnedData(userId)
+      await supabase.auth.signOut()
+      return { fullyDeleted: false, error: null }
+    } catch (err) {
+      return { fullyDeleted: false, error: err instanceof Error ? err.message : 'Failed to delete account data.' }
+    }
+  }
+
   return (
-    <AuthContext.Provider value={{ session, user, profile, loading, signUp, signIn, signOut, updateProfile }}>
+    <AuthContext.Provider value={{ session, user, profile, loading, signUp, signIn, signOut, updateProfile, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   )

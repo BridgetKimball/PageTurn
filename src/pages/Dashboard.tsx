@@ -7,6 +7,7 @@ import {
 } from 'recharts'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { syncExpiredChallenges } from '../lib/challenges'
 import type { UserBook, ReadingSession, Challenge } from '../types'
 import { BookCard } from '../components/books/BookCard'
 import { ChallengeCard } from '../components/challenges/ChallengeCard'
@@ -62,6 +63,8 @@ export function Dashboard() {
     queryKey: ['challenges', user?.id],
     enabled: !!user,
     queryFn: async () => {
+      await syncExpiredChallenges(user!.id)
+
       const { data: cData } = await supabase
         .from('challenges')
         .select('*')

@@ -85,7 +85,11 @@ Create custom reading goals:
 - "Read 4 Romance novels in January" (month, 4 books, Romance filter)
 - "Read 1 book this week" (week, 1 book, no genre filter)
 
-Progress bars update in real time as you finish books. Challenges auto-track status: Active → Completed or Failed.
+Progress bars update automatically: whenever you mark a book "Read" (or edit one that's already read), it's checked against every active challenge — matching on date finished falling within the challenge window, and genre if the challenge has a filter. Challenges past their end date are swept on your next Dashboard or Challenges page load and marked **Completed** (target hit) or **Failed** (target missed) automatically.
+
+Delete a challenge any time from the Challenges page — click the trash icon on its card, confirm, and it's gone (unlinks its progress but doesn't touch your library).
+
+> Genre matching only works for books that have genre data attached (Google Books search results do; Goodreads CSV imports don't — see Import below). A genre-filtered challenge won't auto-count an imported book until you look it up again via Search.
 
 ---
 
@@ -110,14 +114,24 @@ Download your entire library as a CSV file with:
 ### Import (Goodreads)
 - Export your Goodreads library (My Books → Export Library)
 - Upload the CSV to PageTurn
-- Full import (preserving shelves, ratings, reviews) is planned for a future update
+- Imports title, authors, ISBN, page count, your rating, review, reading status, date finished,
+  and recreates any custom Goodreads shelves as PageTurn shelves
+- Goodreads' export format doesn't include cover images or genre/category data, so those stay
+  blank on imported books until you look them up again via Search
+
+---
+
+## Account
+
+Your Profile page has a **Danger Zone** with a "Delete Account" button. It requires typing your
+exact email address to confirm — this permanently deletes every book, shelf, session, and challenge
+you own. There's no undo.
 
 ---
 
 ## Planned Future Features
 
 - Tags (lightweight per-book labels)
-- Full Goodreads CSV import with shelf mapping
 - Social features (share shelves, reading challenges with friends)
 - Reading reminders / push notifications
 - Advanced statistics (reading pace, time-to-finish predictions)

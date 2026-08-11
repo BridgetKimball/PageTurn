@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { BookOpen } from 'lucide-react'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { BookOpen, Info } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { Input } from '../ui/Input'
 import { Button } from '../ui/Button'
@@ -8,6 +8,8 @@ import { Button } from '../ui/Button'
 export function LoginForm() {
   const { signIn } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const notice = (location.state as { notice?: string } | null)?.notice
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -36,6 +38,13 @@ export function LoginForm() {
           <h1 className="text-3xl font-bold font-serif text-gray-900">PageTurn</h1>
           <p className="text-gray-500 mt-1">Your reading life, organized.</p>
         </div>
+
+        {notice && (
+          <div className="flex gap-2 p-3 mb-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+            <Info size={16} className="flex-shrink-0 mt-0.5" />
+            <span>{notice}</span>
+          </div>
+        )}
 
         <div className="bg-white rounded-2xl shadow-sm border border-parchment-200 p-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-6">Sign in to your account</h2>

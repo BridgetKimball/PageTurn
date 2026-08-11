@@ -50,6 +50,27 @@ https://bridgetkimball.github.io/pageturn/
 
 This matters for password-reset links and email confirmations to point back to the right place.
 
+## 5. (Optional) Deploy the account-deletion Edge Function
+
+The "Delete Account" button on the Profile page always wipes all of a user's reading
+data. To also delete the underlying login itself (full account removal, not just data),
+deploy the included Edge Function — this requires the Supabase CLI on your own machine,
+since it needs your Supabase login:
+
+```bash
+npx supabase login
+npx supabase link --project-ref tafroactmrxbchdyzbgj
+npx supabase functions deploy delete-account
+```
+
+(Replace the project ref with your own — find it in your Supabase project URL or
+**Settings → General → Reference ID**.) No secrets need configuring: Supabase automatically
+injects `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` into every
+Edge Function at runtime.
+
+Without this step, "Delete Account" still works — it deletes every book, shelf, session,
+and challenge — but the login itself remains (an empty account someone could sign back into).
+
 ## Notes on this setup
 
 - **Routing:** the app uses `HashRouter` (URLs look like `.../pageturn/#/library`) instead of
