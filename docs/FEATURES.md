@@ -70,6 +70,17 @@ Sessions accumulate into:
 
 ---
 
+## Favorites & Profile
+
+Click the heart icon on any book card (or on its detail page) to favorite it — favorites show up
+in a dedicated section on your Profile page. Profile also shows:
+
+- **Currently Reading** — every book with that status, at a glance
+- **Books read this month / this year**
+- **Top genre** — your most-read genre among finished books
+
+---
+
 ## Reading Challenges
 
 Create custom reading goals:

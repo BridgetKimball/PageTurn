@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom'
-import { BookOpen } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { BookOpen, Heart } from 'lucide-react'
+import { supabase } from '../../lib/supabase'
 import type { Book, UserBook } from '../../types'
 import { StarRating } from '../ui/StarRating'
 import { Badge } from '../ui/Badge'
@@ -19,6 +21,19 @@ interface BookCardProps {
 
 export function BookCard({ book, userBook, onAdd, compact = false }: BookCardProps) {
   const statusInfo = userBook ? STATUS_LABELS[userBook.status] : null
+  const qc = useQueryClient()
+
+  const toggleFavorite = useMutation({
+    mutationFn: async () => {
+      if (!userBook) return
+      await supabase.from('user_books').update({ is_favorite: !userBook.is_favorite }).eq('id', userBook.id)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['user_books'] })
+      qc.invalidateQueries({ queryKey: ['shelf_books'] })
+      qc.invalidateQueries({ queryKey: ['user_book'] })
+    },
+  })
 
   return (
     <Link
@@ -42,6 +57,19 @@ export function BookCard({ book, userBook, onAdd, compact = false }: BookCardPro
           <div className="absolute top-2 left-2">
             <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
           </div>
+        )}
+        {userBook && (
+          <button
+            onClick={(e) => { e.preventDefault(); toggleFavorite.mutate() }}
+            disabled={toggleFavorite.isPending}
+            title={userBook.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
+            className="absolute top-2 right-2 p-1.5 rounded-full bg-white/90 hover:bg-white shadow-sm transition-colors disabled:opacity-50"
+          >
+            <Heart
+              size={14}
+              className={userBook.is_favorite ? 'fill-red-500 text-red-500' : 'text-gray-400'}
+            />
+          </button>
         )}
       </div>
 

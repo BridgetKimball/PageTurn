@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, ChevronLeft, Calendar, BookMarked, Edit3, Plus } from 'lucide-react'
+import { BookOpen, ChevronLeft, Calendar, BookMarked, Edit3, Plus, Heart } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { getBookById } from '../lib/googleBooks'
@@ -30,28 +30,38 @@ export function BookDetail() {
   const [editReview, setEditReview] = useState(false)
   const [reviewText, setReviewText] = useState('')
 
-  const { data: book } = useQuery<Book | null>({
-    queryKey: ['book', googleBooksId],
+  // A book already in our own database (added via Search, or via CSV import)
+  // has everything we need without touching the Google Books API at all —
+  // which matters both for CSV-imported books (their id is a synthetic
+  // "goodreads-..." id Google has never heard of) and for anonymous API
+  // quota limits. Only fall back to a live fetch for a not-yet-added book.
+  const { data: storedBook, isFetched: storedBookFetched } = useQuery<(Book & { id: string }) | null>({
+    queryKey: ['stored_book', googleBooksId],
     enabled: !!googleBooksId,
+    queryFn: async () => {
+      const { data } = await supabase.from('books').select('*').eq('google_books_id', googleBooksId).maybeSingle()
+      return data
+    },
+  })
+
+  const { data: liveBook } = useQuery<Book | null>({
+    queryKey: ['live_book', googleBooksId],
+    enabled: !!googleBooksId && storedBookFetched && !storedBook,
     queryFn: () => getBookById(googleBooksId!),
   })
 
+  const book = storedBook ?? liveBook
+
   const { data: userBook } = useQuery<UserBook | null>({
-    queryKey: ['user_book', googleBooksId, user?.id],
-    enabled: !!user && !!googleBooksId,
+    queryKey: ['user_book', storedBook?.id, user?.id],
+    enabled: !!user && !!storedBook?.id,
     queryFn: async () => {
-      const { data: storedBook } = await supabase
-        .from('books')
-        .select('id')
-        .eq('google_books_id', googleBooksId)
-        .single()
-      if (!storedBook) return null
       const { data } = await supabase
         .from('user_books')
         .select('*')
         .eq('user_id', user!.id)
-        .eq('book_id', storedBook.id)
-        .single()
+        .eq('book_id', storedBook!.id)
+        .maybeSingle()
       return data
     },
   })
@@ -70,19 +80,13 @@ export function BookDetail() {
   })
 
   const { data: bookShelves = [] } = useQuery<Shelf[]>({
-    queryKey: ['book_shelves', googleBooksId, user?.id],
-    enabled: !!user && !!googleBooksId,
+    queryKey: ['book_shelves', storedBook?.id, user?.id],
+    enabled: !!user && !!storedBook?.id,
     queryFn: async () => {
-      const { data: storedBook } = await supabase
-        .from('books')
-        .select('id')
-        .eq('google_books_id', googleBooksId)
-        .single()
-      if (!storedBook) return []
       const { data } = await supabase
         .from('shelf_books')
         .select('shelf:shelves(*)')
-        .eq('book_id', storedBook.id)
+        .eq('book_id', storedBook!.id)
         .eq('user_id', user!.id)
       return (data?.map((r) => r.shelf).filter(Boolean) ?? []) as unknown as Shelf[]
     },
@@ -133,6 +137,16 @@ export function BookDetail() {
       await supabase.from('user_books').update({ rating }).eq('id', userBook!.id)
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['user_book'] }),
+  })
+
+  const toggleFavorite = useMutation({
+    mutationFn: async () => {
+      await supabase.from('user_books').update({ is_favorite: !userBook!.is_favorite }).eq('id', userBook!.id)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['user_book'] })
+      qc.invalidateQueries({ queryKey: ['user_books'] })
+    },
   })
 
   if (!book) {
@@ -188,6 +202,14 @@ export function BookDetail() {
                   <Button size="sm" variant="secondary" onClick={() => setShowAddModal(true)}>
                     <Edit3 size={13} /> Edit
                   </Button>
+                  <button
+                    onClick={() => toggleFavorite.mutate()}
+                    disabled={toggleFavorite.isPending}
+                    title={userBook.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
+                    className="p-2 rounded-lg border border-parchment-200 hover:bg-parchment-50 transition-colors disabled:opacity-50"
+                  >
+                    <Heart size={15} className={userBook.is_favorite ? 'fill-red-500 text-red-500' : 'text-gray-400'} />
+                  </button>
                 </div>
                 {userBook.status === 'reading' && book.page_count && (
                   <div>

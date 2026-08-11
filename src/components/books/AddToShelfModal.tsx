@@ -128,6 +128,7 @@ export function AddToShelfModal({ book, open, onClose, existingUserBook, initial
       qc.invalidateQueries({ queryKey: ['shelf_books'] })
       qc.invalidateQueries({ queryKey: ['challenges'] })
       qc.invalidateQueries({ queryKey: ['user_book'] })
+      qc.invalidateQueries({ queryKey: ['book_shelves'] })
       onClose()
     },
   })

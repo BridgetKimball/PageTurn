@@ -71,6 +71,7 @@ create table if not exists public.user_books (
   date_finished date,
   rating        smallint check (rating >= 1 and rating <= 5),
   review        text,
+  is_favorite   boolean not null default false,
   created_at    timestamptz default now() not null,
   updated_at    timestamptz default now() not null,
   unique (user_id, book_id)

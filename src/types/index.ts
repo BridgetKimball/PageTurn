@@ -37,6 +37,7 @@ export interface UserBook {
   date_finished: string | null
   rating: number | null
   review: string | null
+  is_favorite: boolean
   created_at: string
   updated_at: string
   book?: Book

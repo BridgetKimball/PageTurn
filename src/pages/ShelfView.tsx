@@ -31,16 +31,27 @@ export function ShelfView() {
 
   const currentShelf = allShelves.find((s) => s.id === id)
 
-  const { data: shelfBooks = [], isLoading } = useQuery<ShelfBook[]>({
+  const { data: shelfBooks = [], isLoading, isError } = useQuery<ShelfBook[]>({
     queryKey: ['shelf_books', id, crossShelves, user?.id],
     enabled: !!user && !!id,
     queryFn: async () => {
-      const { data } = await supabase
+      // Note: shelf_books has no FK relationship to user_books (only to
+      // shelves/books/auth.users), so it can't be embedded in one PostgREST
+      // select — fetch user_books separately and merge client-side.
+      const { data: rows, error } = await supabase
         .from('shelf_books')
-        .select('*, book:books(*), user_book:user_books(*)')
+        .select('*, book:books(*)')
         .eq('shelf_id', id)
         .eq('user_id', user!.id)
-      if (!data) return []
+      if (error) throw error
+      if (!rows) return []
+
+      const bookIds = rows.map((r) => r.book_id)
+      const { data: userBooks } = bookIds.length
+        ? await supabase.from('user_books').select('*').eq('user_id', user!.id).in('book_id', bookIds)
+        : { data: [] }
+      const userBookByBookId = new Map((userBooks ?? []).map((ub) => [ub.book_id, ub]))
+      const data = rows.map((r) => ({ ...r, user_book: userBookByBookId.get(r.book_id) }))
 
       if (crossShelves.length === 0) return data
 
@@ -186,7 +197,11 @@ export function ShelfView() {
         )}
       </div>
 
-      {isLoading ? (
+      {isError ? (
+        <div className="text-center py-16 text-red-500 text-sm">
+          Couldn't load this shelf's books. Try refreshing the page.
+        </div>
+      ) : isLoading ? (
         <div className="flex items-center justify-center py-20">
           <div className="animate-spin w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full" />
         </div>
