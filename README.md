@@ -31,6 +31,7 @@ npm run dev
 | [docs/FEATURES.md](docs/FEATURES.md) | Full feature reference |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Tech stack and code structure |
 | [docs/DATABASE_SCHEMA.sql](docs/DATABASE_SCHEMA.sql) | Supabase SQL to run once |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Hosting on GitHub Pages |
 
 ## Stack
 
