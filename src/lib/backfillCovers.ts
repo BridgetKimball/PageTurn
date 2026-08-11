@@ -51,7 +51,9 @@ function titlesLikelyMatch(a: string, b: string): boolean {
   return na.includes(nb) || nb.includes(na) || na.split(' ')[0] === nb.split(' ')[0]
 }
 
-const CONCURRENCY = 2
+// Open Library responds in 0.5-2.4s under real conditions (confirmed via direct
+// testing) but doesn't rate-limit at this volume, so a moderate concurrency is safe.
+const CONCURRENCY = 3
 const CHUNK_SIZE = 150
 
 async function fetchCandidates(bookIds: string[]): Promise<{ rows: BookRow[]; errors: string[] }> {

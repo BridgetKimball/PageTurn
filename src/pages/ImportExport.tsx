@@ -236,7 +236,8 @@ export function ImportExport() {
               which doesn't export cover images) via Google Books or Open Library, and fills in the cover —
               plus genre, description, and page count if those are blank too. Runs automatically right after
               every Goodreads import; use this button to re-run it any time (e.g. after adding a Google Books
-              API key for better matches).
+              API key for better matches). For a large library this can take several minutes — stay on this
+              page until it finishes.
             </p>
 
             <Button
