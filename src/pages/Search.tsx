@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { Search as SearchIcon, X, AlertCircle } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { searchBooks } from '../lib/googleBooks'
+import { searchBooks } from '../lib/bookSearch'
 import type { Book } from '../types'
 import { BookCard } from '../components/books/BookCard'
 import { AddToShelfModal } from '../components/books/AddToShelfModal'
@@ -66,11 +66,13 @@ export function Search() {
           <AlertCircle size={40} className="mx-auto mb-3 opacity-60" />
           <p className="font-medium">Search failed</p>
           <p className="text-sm mt-1 text-red-400 max-w-md mx-auto">
-            {error instanceof Error ? error.message : 'Something went wrong contacting Google Books.'}
+            {error instanceof Error ? error.message : 'Something went wrong reaching either book source.'}
           </p>
           <p className="text-xs mt-3 text-gray-400 max-w-md mx-auto">
-            If this mentions a quota or rate limit, Google's free anonymous search limit has been hit.
-            Adding a Google Books API key (VITE_GOOGLE_BOOKS_API_KEY) raises that limit substantially — see docs/SETUP.md.
+            Search tries Google Books first, then falls back to Open Library automatically — seeing this means
+            both were unreachable just now. It's usually temporary; try again in a moment. Adding a Google Books
+            API key (VITE_GOOGLE_BOOKS_API_KEY) also helps, since Google's free anonymous limit is otherwise shared
+            globally and can run out — see docs/SETUP.md.
           </p>
         </div>
       )}

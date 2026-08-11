@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { BookOpen, ChevronLeft, Calendar, BookMarked, Edit3, Plus, Heart } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { getBookById } from '../lib/googleBooks'
+import { getBookById } from '../lib/bookSearch'
 import type { Book, UserBook, ReadingSession, Shelf } from '../types'
 import { Button } from '../components/ui/Button'
 import { StarRating } from '../components/ui/StarRating'
@@ -44,7 +44,7 @@ export function BookDetail() {
     },
   })
 
-  const { data: liveBook } = useQuery<Book | null>({
+  const { data: liveBook, isFetched: liveBookFetched } = useQuery<Book | null>({
     queryKey: ['live_book', googleBooksId],
     enabled: !!googleBooksId && storedBookFetched && !storedBook,
     queryFn: () => getBookById(googleBooksId!),
@@ -148,6 +148,21 @@ export function BookDetail() {
       qc.invalidateQueries({ queryKey: ['user_books'] })
     },
   })
+
+  const settledWithNoBook = storedBookFetched && !storedBook && liveBookFetched && !liveBook
+
+  if (settledWithNoBook) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <BookOpen size={40} className="text-parchment-300 mb-3" />
+        <p className="text-gray-600 font-medium">Couldn't load this book</p>
+        <p className="text-sm text-gray-400 mt-1 max-w-sm">
+          Its source may be unavailable right now, or the link is out of date.
+        </p>
+        <Link to="/library" className="mt-4 text-sm text-primary-600 hover:underline">Back to Library</Link>
+      </div>
+    )
+  }
 
   if (!book) {
     return (

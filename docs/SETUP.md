@@ -48,12 +48,18 @@
 
 ### Optional: Google Books API Key
 
-Without a key, the app uses ~1,000 free Google Books queries per day — plenty for personal use.
-If you want higher limits:
+Book search tries Google Books first, then automatically falls back to Open Library
+(no key ever required there) if Google fails — so search works out of the box either way.
+A key is still worth adding for better results: Google's free anonymous quota is shared
+globally across everyone using the API without a key, and can run out with no warning
+(you'll see a 429 error) — your own key gets its own separate quota.
+
 1. Go to [console.cloud.google.com](https://console.cloud.google.com).
 2. Create a project → APIs & Services → Enable "Books API".
 3. Credentials → Create API Key.
-4. Add it to `.env`: `VITE_GOOGLE_BOOKS_API_KEY=your-key`
+4. (Recommended) Restrict the key to the Books API only.
+5. Add it to `.env`: `VITE_GOOGLE_BOOKS_API_KEY=your-key`
+6. For the deployed site, also add it as a GitHub repo secret — see docs/DEPLOYMENT.md.
 
 ---
 
@@ -97,4 +103,5 @@ For Vercel: `vercel --prod` after `npm i -g vercel`.
 | "Missing Supabase environment variables" | Check your `.env` file exists and has the correct values |
 | Auth not working | Make sure you ran the SQL schema — especially the `profiles` table |
 | Books not saving | Check Row Level Security is enabled (it is by default in the schema) |
-| Search returning no results | Google Books API is rate-limited without a key; try again after a minute |
+| Search shows "Search failed" | Both Google Books and Open Library were unreachable — rare; try again shortly |
+| Search results have no covers/details | Likely came from the Open Library fallback (Google's quota ran out) — add a Google Books API key for richer results |
