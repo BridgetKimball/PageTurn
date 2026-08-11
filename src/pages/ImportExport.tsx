@@ -1,9 +1,10 @@
 import { useState, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Upload, FileText, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { Download, Upload, FileText, AlertCircle, CheckCircle2, ImageOff } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { importGoodreadsCsv, type ImportSummary } from '../lib/goodreadsImport'
+import { backfillMissingCovers, type BackfillResult } from '../lib/backfillCovers'
 import type { UserBook } from '../types'
 import { Button } from '../components/ui/Button'
 
@@ -34,6 +35,9 @@ export function ImportExport() {
   const [importMessage, setImportMessage] = useState('')
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null)
   const [exportLoading, setExportLoading] = useState(false)
+  const [backfillStatus, setBackfillStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [backfillProgress, setBackfillProgress] = useState({ done: 0, total: 0 })
+  const [backfillResult, setBackfillResult] = useState<BackfillResult | null>(null)
 
   const { data: userBooks = [] } = useQuery<UserBook[]>({
     queryKey: ['user_books', user?.id],
@@ -101,6 +105,25 @@ export function ImportExport() {
     }
 
     if (fileRef.current) fileRef.current.value = ''
+  }
+
+  const missingCoverCount = userBooks.filter((ub) => !ub.book?.cover_url).length
+
+  async function handleBackfillCovers() {
+    if (!user) return
+    setBackfillStatus('running')
+    setBackfillProgress({ done: 0, total: missingCoverCount })
+    setBackfillResult(null)
+
+    try {
+      const result = await backfillMissingCovers(user.id, (done, total) => setBackfillProgress({ done, total }))
+      setBackfillResult(result)
+      setBackfillStatus('done')
+      qc.invalidateQueries({ queryKey: ['user_books'] })
+      qc.invalidateQueries({ queryKey: ['shelf_books'] })
+    } catch {
+      setBackfillStatus('error')
+    }
   }
 
   return (
@@ -193,6 +216,66 @@ export function ImportExport() {
                 Note: Goodreads exports don't include genre/category data, so imported books won't automatically
                 match genre-filtered reading challenges — you can still add them to shelves manually.
               </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Backfill covers */}
+      <div className="bg-white rounded-xl border border-parchment-200 p-6">
+        <div className="flex items-start gap-4">
+          <div className="p-3 bg-amber-50 rounded-xl text-amber-600 flex-shrink-0">
+            <ImageOff size={22} />
+          </div>
+          <div className="flex-1">
+            <h2 className="font-semibold text-gray-900 mb-1">Fix Missing Covers</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Looks up each book in your library that's missing a cover (mainly ones imported from Goodreads,
+              which doesn't export cover images) via Google Books or Open Library, and fills in the cover —
+              plus genre, description, and page count if those are blank too.
+            </p>
+
+            <Button
+              variant="secondary"
+              onClick={handleBackfillCovers}
+              loading={backfillStatus === 'running'}
+              disabled={missingCoverCount === 0}
+            >
+              <ImageOff size={15} />
+              {missingCoverCount === 0 ? 'All books have covers' : `Fix ${missingCoverCount} Missing Cover${missingCoverCount === 1 ? '' : 's'}`}
+            </Button>
+
+            {backfillStatus === 'running' && (
+              <div className="mt-4">
+                <div className="flex justify-between text-xs text-gray-500 mb-1">
+                  <span>Looking up {backfillProgress.done} of {backfillProgress.total}…</span>
+                  <span>{backfillProgress.total ? Math.round((backfillProgress.done / backfillProgress.total) * 100) : 0}%</span>
+                </div>
+                <div className="h-2 bg-parchment-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary-500 rounded-full transition-all"
+                    style={{ width: `${backfillProgress.total ? (backfillProgress.done / backfillProgress.total) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {backfillStatus === 'done' && backfillResult && (
+              <div className="mt-4 p-3 rounded-lg bg-green-50 text-green-700 text-sm flex items-start gap-2">
+                <CheckCircle2 size={15} className="flex-shrink-0 mt-0.5" />
+                Found covers for {backfillResult.updated} of {backfillResult.total} books.
+                {backfillResult.total - backfillResult.updated > 0 && (
+                  <> {backfillResult.total - backfillResult.updated} had no confident match — try again later or
+                  add a Google Books API key for better coverage.</>
+                )}
+              </div>
+            )}
+
+            {backfillStatus === 'error' && (
+              <div className="mt-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm flex items-start gap-2">
+                <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+                Something went wrong. Try again in a moment.
+              </div>
             )}
           </div>
         </div>

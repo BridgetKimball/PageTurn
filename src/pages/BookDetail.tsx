@@ -141,7 +141,11 @@ export function BookDetail() {
 
   const toggleFavorite = useMutation({
     mutationFn: async () => {
-      await supabase.from('user_books').update({ is_favorite: !userBook!.is_favorite }).eq('id', userBook!.id)
+      const { error } = await supabase
+        .from('user_books')
+        .update({ is_favorite: !userBook!.is_favorite })
+        .eq('id', userBook!.id)
+      if (error) throw error
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['user_book'] })
@@ -220,11 +224,21 @@ export function BookDetail() {
                   <button
                     onClick={() => toggleFavorite.mutate()}
                     disabled={toggleFavorite.isPending}
-                    title={userBook.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
-                    className="p-2 rounded-lg border border-parchment-200 hover:bg-parchment-50 transition-colors disabled:opacity-50"
+                    title={
+                      toggleFavorite.isError
+                        ? `Failed: ${toggleFavorite.error instanceof Error ? toggleFavorite.error.message : 'unknown error'}`
+                        : userBook.is_favorite ? 'Remove from favorites' : 'Add to favorites'
+                    }
+                    className={`p-2 rounded-lg border transition-colors disabled:opacity-50
+                      ${toggleFavorite.isError ? 'border-red-400 ring-2 ring-red-200' : 'border-parchment-200 hover:bg-parchment-50'}`}
                   >
                     <Heart size={15} className={userBook.is_favorite ? 'fill-red-500 text-red-500' : 'text-gray-400'} />
                   </button>
+                  {toggleFavorite.isError && (
+                    <span className="text-xs text-red-500">
+                      Couldn't save — did you run the is_favorite migration? See docs/MIGRATIONS.md.
+                    </span>
+                  )}
                 </div>
                 {userBook.status === 'reading' && book.page_count && (
                   <div>

@@ -26,7 +26,11 @@ export function BookCard({ book, userBook, onAdd, compact = false }: BookCardPro
   const toggleFavorite = useMutation({
     mutationFn: async () => {
       if (!userBook) return
-      await supabase.from('user_books').update({ is_favorite: !userBook.is_favorite }).eq('id', userBook.id)
+      const { error } = await supabase
+        .from('user_books')
+        .update({ is_favorite: !userBook.is_favorite })
+        .eq('id', userBook.id)
+      if (error) throw error
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['user_books'] })
@@ -62,8 +66,13 @@ export function BookCard({ book, userBook, onAdd, compact = false }: BookCardPro
           <button
             onClick={(e) => { e.preventDefault(); toggleFavorite.mutate() }}
             disabled={toggleFavorite.isPending}
-            title={userBook.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
-            className="absolute top-2 right-2 p-1.5 rounded-full bg-white/90 hover:bg-white shadow-sm transition-colors disabled:opacity-50"
+            title={
+              toggleFavorite.isError
+                ? `Failed: ${toggleFavorite.error instanceof Error ? toggleFavorite.error.message : 'unknown error'}`
+                : userBook.is_favorite ? 'Remove from favorites' : 'Add to favorites'
+            }
+            className={`absolute top-2 right-2 p-1.5 rounded-full bg-white/90 hover:bg-white shadow-sm transition-colors disabled:opacity-50
+              ${toggleFavorite.isError ? 'ring-2 ring-red-400' : ''}`}
           >
             <Heart
               size={14}
