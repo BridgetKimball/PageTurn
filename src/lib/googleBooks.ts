@@ -1,4 +1,5 @@
 import type { Book, GoogleBooksResponse, GoogleBooksVolume } from '../types'
+import { fetchWithTimeout } from './fetchWithTimeout'
 
 const BASE_URL = 'https://www.googleapis.com/books/v1'
 
@@ -40,7 +41,7 @@ export async function searchBooks(query: string, maxResults = 20): Promise<Book[
   const apiKey = import.meta.env.VITE_GOOGLE_BOOKS_API_KEY
   if (apiKey) params.set('key', apiKey)
 
-  const response = await fetch(`${BASE_URL}/volumes?${params}`)
+  const response = await fetchWithTimeout(`${BASE_URL}/volumes?${params}`)
   if (!response.ok) throw new Error(`Google Books API error: ${response.status}`)
 
   const data: GoogleBooksResponse = await response.json()
@@ -51,7 +52,7 @@ export async function getBookById(googleBooksId: string): Promise<Book | null> {
   const apiKey = import.meta.env.VITE_GOOGLE_BOOKS_API_KEY
   const params = apiKey ? `?key=${apiKey}` : ''
 
-  const response = await fetch(`${BASE_URL}/volumes/${googleBooksId}${params}`)
+  const response = await fetchWithTimeout(`${BASE_URL}/volumes/${googleBooksId}${params}`)
   if (!response.ok) return null
 
   const volume: GoogleBooksVolume = await response.json()

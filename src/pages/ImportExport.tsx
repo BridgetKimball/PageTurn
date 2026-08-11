@@ -78,6 +78,25 @@ export function ImportExport() {
     setExportLoading(false)
   }
 
+  const missingCoverCount = userBooks.filter((ub) => !ub.book?.cover_url).length
+
+  async function runBackfill() {
+    if (!user) return
+    setBackfillStatus('running')
+    setBackfillProgress({ done: 0, total: 0 })
+    setBackfillResult(null)
+
+    try {
+      const result = await backfillMissingCovers(user.id, (done, total) => setBackfillProgress({ done, total }))
+      setBackfillResult(result)
+      setBackfillStatus('done')
+      qc.invalidateQueries({ queryKey: ['user_books'] })
+      qc.invalidateQueries({ queryKey: ['shelf_books'] })
+    } catch {
+      setBackfillStatus('error')
+    }
+  }
+
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file || !user) return
@@ -99,31 +118,14 @@ export function ImportExport() {
       qc.invalidateQueries({ queryKey: ['shelves'] })
       qc.invalidateQueries({ queryKey: ['shelf_books'] })
       qc.invalidateQueries({ queryKey: ['challenges'] })
+
+      if (summary.imported > 0) runBackfill()
     } catch (err) {
       setImportStatus('error')
       setImportMessage(err instanceof Error ? err.message : 'Failed to import file.')
     }
 
     if (fileRef.current) fileRef.current.value = ''
-  }
-
-  const missingCoverCount = userBooks.filter((ub) => !ub.book?.cover_url).length
-
-  async function handleBackfillCovers() {
-    if (!user) return
-    setBackfillStatus('running')
-    setBackfillProgress({ done: 0, total: missingCoverCount })
-    setBackfillResult(null)
-
-    try {
-      const result = await backfillMissingCovers(user.id, (done, total) => setBackfillProgress({ done, total }))
-      setBackfillResult(result)
-      setBackfillStatus('done')
-      qc.invalidateQueries({ queryKey: ['user_books'] })
-      qc.invalidateQueries({ queryKey: ['shelf_books'] })
-    } catch {
-      setBackfillStatus('error')
-    }
   }
 
   return (
@@ -211,10 +213,10 @@ export function ImportExport() {
               </div>
             )}
 
-            {importSummary && (
+            {importSummary && importStatus === 'success' && (
               <p className="mt-2 text-xs text-gray-400">
-                Note: Goodreads exports don't include genre/category data, so imported books won't automatically
-                match genre-filtered reading challenges — you can still add them to shelves manually.
+                Now looking up covers and genres for the imported books below — this runs automatically after
+                every import.
               </p>
             )}
           </div>
@@ -232,14 +234,16 @@ export function ImportExport() {
             <p className="text-sm text-gray-500 mb-4">
               Looks up each book in your library that's missing a cover (mainly ones imported from Goodreads,
               which doesn't export cover images) via Google Books or Open Library, and fills in the cover —
-              plus genre, description, and page count if those are blank too.
+              plus genre, description, and page count if those are blank too. Runs automatically right after
+              every Goodreads import; use this button to re-run it any time (e.g. after adding a Google Books
+              API key for better matches).
             </p>
 
             <Button
               variant="secondary"
-              onClick={handleBackfillCovers}
+              onClick={runBackfill}
               loading={backfillStatus === 'running'}
-              disabled={missingCoverCount === 0}
+              disabled={missingCoverCount === 0 || backfillStatus === 'running'}
             >
               <ImageOff size={15} />
               {missingCoverCount === 0 ? 'All books have covers' : `Fix ${missingCoverCount} Missing Cover${missingCoverCount === 1 ? '' : 's'}`}
@@ -248,7 +252,7 @@ export function ImportExport() {
             {backfillStatus === 'running' && (
               <div className="mt-4">
                 <div className="flex justify-between text-xs text-gray-500 mb-1">
-                  <span>Looking up {backfillProgress.done} of {backfillProgress.total}…</span>
+                  <span>{backfillProgress.total ? `Looking up ${backfillProgress.done} of ${backfillProgress.total}…` : 'Loading your library…'}</span>
                   <span>{backfillProgress.total ? Math.round((backfillProgress.done / backfillProgress.total) * 100) : 0}%</span>
                 </div>
                 <div className="h-2 bg-parchment-100 rounded-full overflow-hidden">
@@ -261,12 +265,20 @@ export function ImportExport() {
             )}
 
             {backfillStatus === 'done' && backfillResult && (
-              <div className="mt-4 p-3 rounded-lg bg-green-50 text-green-700 text-sm flex items-start gap-2">
-                <CheckCircle2 size={15} className="flex-shrink-0 mt-0.5" />
-                Found covers for {backfillResult.updated} of {backfillResult.total} books.
-                {backfillResult.total - backfillResult.updated > 0 && (
-                  <> {backfillResult.total - backfillResult.updated} had no confident match — try again later or
-                  add a Google Books API key for better coverage.</>
+              <div className="mt-4 space-y-2">
+                <div className="p-3 rounded-lg bg-green-50 text-green-700 text-sm flex items-start gap-2">
+                  <CheckCircle2 size={15} className="flex-shrink-0 mt-0.5" />
+                  <span>
+                    Found covers for {backfillResult.updated} of {backfillResult.total} books.
+                    {backfillResult.noMatch > 0 && ` ${backfillResult.noMatch} had no match found.`}
+                    {backfillResult.failed > 0 && ` ${backfillResult.failed} hit an error.`}
+                  </span>
+                </div>
+                {backfillResult.sampleErrors.length > 0 && (
+                  <div className="p-3 rounded-lg bg-amber-50 text-amber-800 text-xs space-y-1">
+                    <p className="font-medium">Sample errors (for troubleshooting):</p>
+                    {backfillResult.sampleErrors.map((err, i) => <p key={i}>• {err}</p>)}
+                  </div>
                 )}
               </div>
             )}

@@ -1,4 +1,5 @@
 import type { Book } from '../types'
+import { fetchWithTimeout } from './fetchWithTimeout'
 
 const BASE_URL = 'https://openlibrary.org'
 
@@ -44,7 +45,7 @@ export async function searchOpenLibrary(query: string, maxResults = 20): Promise
     fields: 'key,title,author_name,cover_i,first_publish_year,number_of_pages_median,isbn,subject,publisher',
   })
 
-  const response = await fetch(`${BASE_URL}/search.json?${params}`)
+  const response = await fetchWithTimeout(`${BASE_URL}/search.json?${params}`)
   if (!response.ok) throw new Error(`Open Library API error: ${response.status}`)
 
   const data: { docs?: OpenLibraryDoc[] } = await response.json()
@@ -55,7 +56,7 @@ async function getAuthorNames(authorRefs: { author: { key: string } }[]): Promis
   const names = await Promise.all(
     authorRefs.slice(0, 3).map(async (ref) => {
       try {
-        const res = await fetch(`${BASE_URL}${ref.author.key}.json`)
+        const res = await fetchWithTimeout(`${BASE_URL}${ref.author.key}.json`)
         if (!res.ok) return null
         const data = await res.json()
         return (data.name as string) ?? null
@@ -68,7 +69,7 @@ async function getAuthorNames(authorRefs: { author: { key: string } }[]): Promis
 }
 
 export async function getOpenLibraryBookById(olid: string): Promise<Book | null> {
-  const response = await fetch(`${BASE_URL}/works/${olid}.json`)
+  const response = await fetchWithTimeout(`${BASE_URL}/works/${olid}.json`)
   if (!response.ok) return null
 
   const work = await response.json()
