@@ -105,19 +105,10 @@ export function Dashboard() {
 
   const booksReadInPeriod = booksRead.filter((ub) => inStatsPeriod(ub.date_finished))
 
-  // reading_sessions rows only exist when a user manually logs a session on
-  // a book's page — for a library built from a Goodreads import (this app's
-  // main use case), that table is typically empty even though hundreds of
-  // books have real date_finished + page_count data. Use each finished
-  // book's page count as the primary signal, and only add logged-session
-  // pages for books not already counted that way, so pages aren't double
-  // counted for someone who both logs sessions and marks books read.
-  const finishedInPeriodIds = new Set(booksReadInPeriod.map((ub) => ub.id))
-  const periodPagesFromFinishedBooks = booksReadInPeriod.reduce((sum, ub) => sum + (ub.book?.page_count ?? 0), 0)
-  const periodPagesFromSessions = sessions
-    .filter((s) => inStatsPeriod(s.date) && !finishedInPeriodIds.has(s.user_book_id))
-    .reduce((sum, s) => sum + (s.pages_read ?? 0), 0)
-  const periodPages = periodPagesFromFinishedBooks + periodPagesFromSessions
+  // A book's pages only count once it's actually finished — an in-progress
+  // book's current page (tracked via Log Session on its own page) shouldn't
+  // move this total, so this deliberately doesn't look at reading_sessions.
+  const periodPages = booksReadInPeriod.reduce((sum, ub) => sum + (ub.book?.page_count ?? 0), 0)
   const periodRated = booksReadInPeriod.filter((b) => b.rating)
   const periodAvgRating = periodRated.length
     ? (periodRated.reduce((sum, b) => sum + (b.rating ?? 0), 0) / periodRated.length).toFixed(1)

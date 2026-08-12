@@ -25,7 +25,7 @@ export function BookDetail() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showSessionModal, setShowSessionModal] = useState(false)
   const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0])
-  const [sessionPages, setSessionPages] = useState('')
+  const [sessionCurrentPage, setSessionCurrentPage] = useState('')
   const [sessionNotes, setSessionNotes] = useState('')
   const [editReview, setEditReview] = useState(false)
   const [reviewText, setReviewText] = useState('')
@@ -94,16 +94,19 @@ export function BookDetail() {
 
   const logSession = useMutation({
     mutationFn: async () => {
+      const previousPage = userBook?.current_page ?? 0
+      let newPage = parseInt(sessionCurrentPage)
+      if (book?.page_count) newPage = Math.min(newPage, book.page_count)
+      const pagesRead = Math.max(0, newPage - previousPage)
+
       await supabase.from('reading_sessions').insert({
         user_id: user!.id,
         user_book_id: userBook!.id,
         date: sessionDate,
-        pages_read: parseInt(sessionPages),
+        pages_read: pagesRead,
         notes: sessionNotes || null,
       })
-      // Update current page
-      if (userBook && sessionPages) {
-        const newPage = (userBook.current_page ?? 0) + parseInt(sessionPages)
+      if (userBook) {
         await supabase
           .from('user_books')
           .update({ current_page: newPage })
@@ -115,7 +118,7 @@ export function BookDetail() {
       qc.invalidateQueries({ queryKey: ['user_book'] })
       qc.invalidateQueries({ queryKey: ['reading_sessions'] })
       setShowSessionModal(false)
-      setSessionPages(''); setSessionNotes('')
+      setSessionCurrentPage(''); setSessionNotes('')
     },
   })
 
@@ -177,6 +180,12 @@ export function BookDetail() {
   }
 
   const totalPagesRead = sessions.reduce((sum, s) => sum + (s.pages_read ?? 0), 0)
+
+  const sessionPreviewPage = parseInt(sessionCurrentPage)
+  const sessionPreviewPercent =
+    book.page_count && !isNaN(sessionPreviewPage)
+      ? Math.min(100, Math.max(0, Math.round((sessionPreviewPage / book.page_count) * 100)))
+      : null
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -335,7 +344,10 @@ export function BookDetail() {
                 <span className="text-sm font-normal text-gray-400">({totalPagesRead} pages total)</span>
               </h2>
               {userBook.status === 'reading' && (
-                <Button size="sm" onClick={() => setShowSessionModal(true)}>
+                <Button size="sm" onClick={() => {
+                  setSessionCurrentPage(userBook.current_page ? String(userBook.current_page) : '')
+                  setShowSessionModal(true)
+                }}>
                   <Plus size={13} /> Log Session
                 </Button>
               )}
@@ -375,15 +387,30 @@ export function BookDetail() {
             />
           </div>
           <div>
-            <label className="text-sm font-medium text-gray-700 block mb-1">Pages Read</label>
+            <label className="text-sm font-medium text-gray-700 block mb-1">Current Page</label>
             <input
               type="number"
               min={1}
-              value={sessionPages}
-              onChange={(e) => setSessionPages(e.target.value)}
-              placeholder="How many pages did you read?"
+              max={book.page_count ?? undefined}
+              value={sessionCurrentPage}
+              onChange={(e) => setSessionCurrentPage(e.target.value)}
+              placeholder="What page are you on?"
               className="w-full rounded-lg border border-parchment-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
             />
+            {sessionPreviewPercent !== null && (
+              <div className="mt-2">
+                <div className="flex justify-between text-xs text-gray-400 mb-1">
+                  <span>Page {sessionPreviewPage} of {book.page_count}</span>
+                  <span>{sessionPreviewPercent}%</span>
+                </div>
+                <div className="h-2 bg-parchment-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary-500 rounded-full transition-all"
+                    style={{ width: `${sessionPreviewPercent}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
           <div>
             <label className="text-sm font-medium text-gray-700 block mb-1">Notes (optional)</label>
@@ -397,7 +424,7 @@ export function BookDetail() {
           </div>
           <div className="flex gap-3">
             <Button variant="secondary" onClick={() => setShowSessionModal(false)} className="flex-1">Cancel</Button>
-            <Button onClick={() => logSession.mutate()} loading={logSession.isPending} disabled={!sessionPages} className="flex-1">
+            <Button onClick={() => logSession.mutate()} loading={logSession.isPending} disabled={!sessionCurrentPage} className="flex-1">
               Save Session
             </Button>
           </div>
