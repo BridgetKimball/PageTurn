@@ -13,6 +13,7 @@ export interface BackfillResult {
   updated: number
   failed: number
   noMatch: number
+  duplicatesCleared: number
   sampleErrors: string[]
   noMatchSamples: NoMatchSample[]
 }
@@ -52,28 +53,64 @@ function stripSeriesSuffix(title: string): string {
   return result || title
 }
 
-function titlesLikelyMatch(a: string, b: string): boolean {
-  const na = normalize(a)
-  const nb = normalize(b)
-  if (!na || !nb) return false
-  return na.includes(nb) || nb.includes(na) || na.split(' ')[0] === nb.split(' ')[0]
+/** For long subtitle-heavy titles ("Title: A Complete Guide to..."), the part
+ * before the separator is usually the actual distinctive title — worth a
+ * second, narrower search attempt if the full string finds nothing. */
+function primaryTitleFragment(title: string): string | null {
+  const m = title.match(/^(.+?)\s*(?::|—|–|--|\s-\s)\s+.+$/)
+  const fragment = m?.[1]?.trim()
+  return fragment && fragment.length >= 3 && fragment !== title ? fragment : null
 }
+
+const STOPWORDS = new Set([
+  'the', 'a', 'an', 'of', 'and', 'in', 'on', 'for', 'to', 'with', 'from', 'at', 'by', 'or',
+])
+
+function significantTokens(title: string): Set<string> {
+  return new Set(normalize(title).split(' ').filter((w) => w.length > 1 && !STOPWORDS.has(w)))
+}
+
+/**
+ * Fraction of the shorter title's distinctive words that also appear in the
+ * other title. Two different books by the same author/series (e.g. "The
+ * Queen's Assassin" vs "The Queen's Secret") share a leading word or two but
+ * diverge on the word that actually distinguishes them — this catches that,
+ * unlike a naive "same first word" or substring check.
+ */
+function titleConfidence(a: string, b: string): number {
+  const ta = significantTokens(a)
+  const tb = significantTokens(b)
+  if (!ta.size || !tb.size) return 0
+  const [smaller, larger] = ta.size <= tb.size ? [ta, tb] : [tb, ta]
+  let overlap = 0
+  for (const t of smaller) if (larger.has(t)) overlap++
+  return overlap / smaller.size
+}
+
+const MATCH_THRESHOLD = 0.7
 
 // Open Library responds in 0.5-2.4s under real conditions (confirmed via direct
 // testing) but doesn't rate-limit at this volume, so a moderate concurrency is safe.
 const CONCURRENCY = 3
 const CHUNK_SIZE = 150
 
-async function fetchCandidates(bookIds: string[]): Promise<{ rows: BookRow[]; errors: string[] }> {
+async function fetchUserBookIds(userId: string): Promise<{ ids: string[]; error: string | null }> {
+  const { data, error } = await supabase.from('user_books').select('book_id').eq('user_id', userId)
+  if (error) return { ids: [], error: error.message }
+  return { ids: Array.from(new Set((data ?? []).map((r) => r.book_id))), error: null }
+}
+
+async function fetchBooksByIds(bookIds: string[], onlyMissingCover: boolean): Promise<{ rows: BookRow[]; errors: string[] }> {
   const rows: BookRow[] = []
   const errors: string[] = []
   for (let i = 0; i < bookIds.length; i += CHUNK_SIZE) {
     const chunk = bookIds.slice(i, i + CHUNK_SIZE)
-    const { data, error } = await supabase
+    let query = supabase
       .from('books')
       .select('id, title, authors, cover_url, genres, description, page_count, isbn, publisher')
       .in('id', chunk)
-      .is('cover_url', null)
+    if (onlyMissingCover) query = query.is('cover_url', null)
+    const { data, error } = await query
     if (error) errors.push(`Fetching books: ${error.message}`)
     if (data) rows.push(...data)
   }
@@ -85,25 +122,49 @@ function delay(ms: number) {
 }
 
 /**
+ * Repairs damage from an earlier, looser matching heuristic: finds any
+ * cover_url shared by more than one of this user's books (a wrong match
+ * can't be correct for both) and clears it so the next backfill re-matches
+ * them with the stricter logic instead of leaving a confidently-wrong cover.
+ */
+export async function deduplicateCovers(userId: string): Promise<{ cleared: number }> {
+  const { ids: bookIds } = await fetchUserBookIds(userId)
+  if (!bookIds.length) return { cleared: 0 }
+
+  const { rows } = await fetchBooksByIds(bookIds, false)
+  const countByUrl = new Map<string, number>()
+  for (const b of rows) if (b.cover_url) countByUrl.set(b.cover_url, (countByUrl.get(b.cover_url) ?? 0) + 1)
+
+  const duplicateIds = rows.filter((b) => b.cover_url && (countByUrl.get(b.cover_url) ?? 0) > 1).map((b) => b.id)
+  if (!duplicateIds.length) return { cleared: 0 }
+
+  await supabase.from('books').update({ cover_url: null }).in('id', duplicateIds)
+  return { cleared: duplicateIds.length }
+}
+
+/**
  * Goodreads CSV imports have no cover_url (Goodreads doesn't export one).
  * Look each book missing a cover up via Google Books / Open Library
  * (bookSearch.ts already falls back between the two) and fill in whatever
  * metadata is still blank. Books are shared rows, so this benefits anyone
  * else who has the same book too.
+ *
+ * Always clears existing duplicate covers first (see deduplicateCovers) so
+ * a run both repairs past mistakes and avoids making new ones.
  */
 export async function backfillMissingCovers(userId: string, onProgress?: BackfillProgress): Promise<BackfillResult> {
-  const { data: ubRows, error: ubError } = await supabase.from('user_books').select('book_id').eq('user_id', userId)
-  if (ubError) {
-    return { total: 0, updated: 0, failed: 0, noMatch: 0, sampleErrors: [`Loading library: ${ubError.message}`], noMatchSamples: [] }
-  }
+  const empty = (extra: Partial<BackfillResult> = {}): BackfillResult => ({
+    total: 0, updated: 0, failed: 0, noMatch: 0, duplicatesCleared: 0, sampleErrors: [], noMatchSamples: [], ...extra,
+  })
 
-  const bookIds = Array.from(new Set((ubRows ?? []).map((r) => r.book_id)))
-  if (!bookIds.length) return { total: 0, updated: 0, failed: 0, noMatch: 0, sampleErrors: [], noMatchSamples: [] }
+  const { cleared: duplicatesCleared } = await deduplicateCovers(userId)
 
-  const { rows: candidates, errors: fetchErrors } = await fetchCandidates(bookIds)
-  if (!candidates.length) {
-    return { total: 0, updated: 0, failed: 0, noMatch: 0, sampleErrors: fetchErrors, noMatchSamples: [] }
-  }
+  const { ids: bookIds, error: ubError } = await fetchUserBookIds(userId)
+  if (ubError) return empty({ sampleErrors: [`Loading library: ${ubError}`] })
+  if (!bookIds.length) return empty()
+
+  const { rows: candidates, errors: fetchErrors } = await fetchBooksByIds(bookIds, true)
+  if (!candidates.length) return empty({ duplicatesCleared, sampleErrors: fetchErrors })
 
   let done = 0
   let updated = 0
@@ -111,6 +172,7 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
   let noMatch = 0
   const sampleErrors: string[] = [...fetchErrors]
   const noMatchSamples: NoMatchSample[] = []
+  const assignedCoverUrls = new Set<string>()
 
   function recordError(message: string) {
     if (sampleErrors.length < 5 && !sampleErrors.includes(message)) sampleErrors.push(message)
@@ -121,20 +183,49 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
     if (noMatchSamples.length < 10) noMatchSamples.push(sample)
   }
 
+  async function trySearch(query: string) {
+    return searchBooks(query, 5)
+  }
+
   async function processOne(book: BookRow) {
-    const searchedAs = `${stripSeriesSuffix(book.title)} ${book.authors[0] ?? ''}`.trim()
+    const strippedTitle = stripSeriesSuffix(book.title)
+    const author = book.authors[0] ?? ''
+    const primarySearch = `${strippedTitle} ${author}`.trim()
+
     try {
-      const results = await searchBooks(searchedAs, 5)
+      let results = await trySearch(primarySearch)
+      let searchedAs = primarySearch
+
+      if (!results.length) {
+        const fragment = primaryTitleFragment(strippedTitle)
+        if (fragment) {
+          const fallbackQuery = `${fragment} ${author}`.trim()
+          const fallbackResults = await trySearch(fallbackQuery)
+          if (fallbackResults.length) {
+            results = fallbackResults
+            searchedAs = fallbackQuery
+          }
+        }
+      }
+
       if (!results.length) {
         recordNoMatch({ title: book.title, searchedAs, resultCount: 0, topResultTitle: null })
         return
       }
-      // Prefer a result whose title clearly matches; fall back to the
-      // top-ranked result rather than giving up entirely, since search
-      // APIs already rank by relevance.
-      const match = results.find((r) => titlesLikelyMatch(r.title, book.title)) ?? results[0]
 
-      if (!match.cover_url) {
+      const scored = results
+        .map((r) => ({ result: r, score: titleConfidence(r.title, book.title) }))
+        .sort((a, b) => b.score - a.score)
+      const best = scored[0]
+
+      if (!best || best.score < MATCH_THRESHOLD) {
+        recordNoMatch({ title: book.title, searchedAs, resultCount: results.length, topResultTitle: best?.result.title ?? null })
+        return
+      }
+
+      const match = best.result
+
+      if (!match.cover_url || assignedCoverUrls.has(match.cover_url)) {
         recordNoMatch({ title: book.title, searchedAs, resultCount: results.length, topResultTitle: match.title })
         return
       }
@@ -155,6 +246,7 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
         failed++
         recordError(`Saving "${book.title}": ${error.message}`)
       } else {
+        assignedCoverUrls.add(match.cover_url)
         updated++
       }
     } catch (err) {
@@ -176,5 +268,5 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, worker))
 
-  return { total: candidates.length, updated, failed, noMatch, sampleErrors, noMatchSamples }
+  return { total: candidates.length, updated, failed, noMatch, duplicatesCleared, sampleErrors, noMatchSamples }
 }

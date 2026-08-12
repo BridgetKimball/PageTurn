@@ -234,10 +234,10 @@ export function ImportExport() {
             <p className="text-sm text-gray-500 mb-4">
               Looks up each book in your library that's missing a cover (mainly ones imported from Goodreads,
               which doesn't export cover images) via Google Books or Open Library, and fills in the cover —
-              plus genre, description, and page count if those are blank too. Runs automatically right after
-              every Goodreads import; use this button to re-run it any time (e.g. after adding a Google Books
-              API key for better matches). For a large library this can take several minutes — stay on this
-              page until it finishes.
+              plus genre, description, and page count if those are blank too. Also checks for two books
+              incorrectly sharing the same cover and clears them for re-matching. Runs automatically right
+              after every Goodreads import; use this button to re-run it any time. For a large library this
+              can take several minutes — stay on this page until it finishes.
             </p>
 
             <Button
@@ -270,8 +270,10 @@ export function ImportExport() {
                 <div className="p-3 rounded-lg bg-green-50 text-green-700 text-sm flex items-start gap-2">
                   <CheckCircle2 size={15} className="flex-shrink-0 mt-0.5" />
                   <span>
+                    {backfillResult.duplicatesCleared > 0 &&
+                      `Cleared ${backfillResult.duplicatesCleared} wrongly-shared cover${backfillResult.duplicatesCleared === 1 ? '' : 's'} for re-matching. `}
                     Found covers for {backfillResult.updated} of {backfillResult.total} books.
-                    {backfillResult.noMatch > 0 && ` ${backfillResult.noMatch} had no match found.`}
+                    {backfillResult.noMatch > 0 && ` ${backfillResult.noMatch} had no confident match.`}
                     {backfillResult.failed > 0 && ` ${backfillResult.failed} hit an error.`}
                   </span>
                 </div>
@@ -288,7 +290,7 @@ export function ImportExport() {
                       <div key={i} className="border-b border-gray-200 pb-1 last:border-0">
                         <p>"{s.title}" → searched as "{s.searchedAs}"</p>
                         <p className="text-gray-400">
-                          {s.resultCount === 0 ? 'zero search results' : `${s.resultCount} results, top match "${s.topResultTitle}" had no cover`}
+                          {s.resultCount === 0 ? 'zero search results' : `${s.resultCount} results, closest was "${s.topResultTitle}" (not confident enough or already used)`}
                         </p>
                       </div>
                     ))}
