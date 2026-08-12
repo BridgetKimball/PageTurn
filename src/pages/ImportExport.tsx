@@ -3,9 +3,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Upload, FileText, AlertCircle, CheckCircle2, ImageOff, Copy } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { importGoodreadsCsv, type ImportSummary } from '../lib/goodreadsImport'
+import { importGoodreadsCsv, parseCsv, type ImportSummary } from '../lib/goodreadsImport'
 import { backfillMissingCovers, type BackfillResult } from '../lib/backfillCovers'
 import { dedupeLibraryBooks, type DedupeResult } from '../lib/dedupeLibrary'
+import { applyCoverPatch, isCoverPatchFormat } from '../lib/coverPatch'
 import type { UserBook } from '../types'
 import { Button } from '../components/ui/Button'
 
@@ -87,6 +88,20 @@ export function ImportExport() {
 
   const missingCoverCount = userBooks.filter((ub) => !ub.book?.cover_url).length
 
+  function handleExportMissingCovers() {
+    const rows = userBooks
+      .filter((ub) => !ub.book?.cover_url)
+      .map((ub) => ({ title: ub.book?.title ?? '', author: ub.book?.authors[0] ?? '' }))
+    const csv = toCSV(rows)
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `pageturn-missing-covers-${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   async function runBackfill() {
     if (!user) return
     setBackfillStatus('running')
@@ -129,20 +144,36 @@ export function ImportExport() {
 
     try {
       const text = await file.text()
-      const summary = await importGoodreadsCsv(user.id, text)
-      setImportSummary(summary)
-      setImportMessage(
-        `Imported ${summary.imported} of ${summary.totalRows} books` +
-        (summary.shelvesCreated ? `, created ${summary.shelvesCreated} new shelf${summary.shelvesCreated === 1 ? '' : 'es'}` : '') +
-        '.'
-      )
-      setImportStatus(summary.errors.length && summary.imported === 0 ? 'error' : 'success')
-      qc.invalidateQueries({ queryKey: ['user_books'] })
-      qc.invalidateQueries({ queryKey: ['shelves'] })
-      qc.invalidateQueries({ queryKey: ['shelf_books'] })
-      qc.invalidateQueries({ queryKey: ['challenges'] })
+      const headers = parseCsv(text)[0]?.map((h) => h.trim().toLowerCase()) ?? []
 
-      if (summary.imported > 0) runBackfill()
+      if (isCoverPatchFormat(headers)) {
+        const patchResult = await applyCoverPatch(user.id, text)
+        setImportMessage(
+          `Applied ${patchResult.applied} of ${patchResult.totalRows} covers.` +
+          (patchResult.notFound > 0 ? ` ${patchResult.notFound} titles didn't match a book in your library.` : '')
+        )
+        setImportStatus(patchResult.applied === 0 && patchResult.totalRows > 0 ? 'error' : 'success')
+        if (patchResult.notFoundTitles.length) {
+          setImportSummary({ totalRows: patchResult.totalRows, imported: patchResult.applied, skipped: patchResult.notFound, shelvesCreated: 0, errors: patchResult.notFoundTitles.map((t) => `No confident match: "${t}"`) })
+        }
+        qc.invalidateQueries({ queryKey: ['user_books'] })
+        qc.invalidateQueries({ queryKey: ['shelf_books'] })
+      } else {
+        const summary = await importGoodreadsCsv(user.id, text)
+        setImportSummary(summary)
+        setImportMessage(
+          `Imported ${summary.imported} of ${summary.totalRows} books` +
+          (summary.shelvesCreated ? `, created ${summary.shelvesCreated} new shelf${summary.shelvesCreated === 1 ? '' : 'es'}` : '') +
+          '.'
+        )
+        setImportStatus(summary.errors.length && summary.imported === 0 ? 'error' : 'success')
+        qc.invalidateQueries({ queryKey: ['user_books'] })
+        qc.invalidateQueries({ queryKey: ['shelves'] })
+        qc.invalidateQueries({ queryKey: ['shelf_books'] })
+        qc.invalidateQueries({ queryKey: ['challenges'] })
+
+        if (summary.imported > 0) runBackfill()
+      }
     } catch (err) {
       setImportStatus('error')
       setImportMessage(err instanceof Error ? err.message : 'Failed to import file.')
@@ -194,12 +225,13 @@ export function ImportExport() {
           <div className="flex-1">
             <h2 className="font-semibold text-gray-900 mb-1">Import a Library</h2>
             <p className="text-sm text-gray-500 mb-2">
-              Accepts a Goodreads export (My Books → Export) or a CSV previously downloaded from
-              "Export Library" above — detected automatically.
+              Accepts a Goodreads export, a CSV previously downloaded from "Export Library" above, or a
+              simple <code>title, author, cover_url</code> cover list — the format is detected automatically.
             </p>
             <ol className="text-xs text-gray-500 list-decimal list-inside mb-4 space-y-1">
               <li>Goodreads: go to <strong>goodreads.com</strong> → My Books → scroll down → <strong>Export Library</strong></li>
               <li>PageTurn: use a CSV from "Export Library" above — restores covers/genres without any lookups</li>
+              <li>Cover list: a CSV with just <code>title</code>, optional <code>author</code>, and <code>cover_url</code> columns — matches by title against your existing books and updates just the cover</li>
               <li>Upload the CSV below</li>
             </ol>
             <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-4">
@@ -271,15 +303,25 @@ export function ImportExport() {
               can take several minutes — stay on this page until it finishes.
             </p>
 
-            <Button
-              variant="secondary"
-              onClick={runBackfill}
-              loading={backfillStatus === 'running'}
-              disabled={missingCoverCount === 0 || backfillStatus === 'running'}
-            >
-              <ImageOff size={15} />
-              {missingCoverCount === 0 ? 'All books have covers' : `Fix ${missingCoverCount} Missing Cover${missingCoverCount === 1 ? '' : 's'}`}
-            </Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                variant="secondary"
+                onClick={runBackfill}
+                loading={backfillStatus === 'running'}
+                disabled={missingCoverCount === 0 || backfillStatus === 'running'}
+              >
+                <ImageOff size={15} />
+                {missingCoverCount === 0 ? 'All books have covers' : `Fix ${missingCoverCount} Missing Cover${missingCoverCount === 1 ? '' : 's'}`}
+              </Button>
+              {missingCoverCount > 0 && (
+                <button
+                  onClick={handleExportMissingCovers}
+                  className="text-xs text-primary-600 hover:text-primary-800 hover:underline"
+                >
+                  Export list of {missingCoverCount} still missing (title/author only)
+                </button>
+              )}
+            </div>
 
             {backfillStatus === 'running' && (
               <div className="mt-4">

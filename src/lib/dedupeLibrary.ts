@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { matchKey as titleAuthorKey } from './titleMatch'
 import type { ReadingStatus } from '../types'
 
 export interface DedupeResult {
@@ -29,24 +30,8 @@ interface UserBookRow {
   date_finished: string | null
 }
 
-function normalize(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-}
-
-/** Same trailing-series-annotation strip used by the cover backfill, so
- * "Book Title (Series, #2)" groups with a copy that's missing the suffix. */
-function stripSeriesSuffix(title: string): string {
-  let result = title
-  let prev: string
-  do {
-    prev = result
-    result = result.replace(/\s*\([^()]*\)\s*$/, '').trim()
-  } while (result !== prev && result.length > 0)
-  return result || title
-}
-
 function matchKey(book: BookRow): string {
-  return `${normalize(stripSeriesSuffix(book.title))}|${normalize(book.authors[0] ?? '')}`
+  return titleAuthorKey(book.title, book.authors[0] ?? '')
 }
 
 /** More complete data wins as the surviving record; ties broken by whichever
