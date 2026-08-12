@@ -51,6 +51,7 @@ export interface Shelf {
   name: string
   description: string | null
   color: string
+  folder: string | null
   is_default: boolean
   created_at: string
   book_count?: number

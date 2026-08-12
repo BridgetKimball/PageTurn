@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { BookMarked, Trash2, Filter, X, Plus } from 'lucide-react'
+import { BookMarked, Trash2, Filter, X, Plus, Edit3 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import type { Shelf, ShelfBook } from '../types'
@@ -20,6 +20,7 @@ export function ShelfView() {
   const qc = useQueryClient()
   const [crossShelves, setCrossShelves] = useState<string[]>([])
   const [showCreateShelf, setShowCreateShelf] = useState(false)
+  const [showEditShelf, setShowEditShelf] = useState(false)
   const [genreFilter, setGenreFilter] = useState('')
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
@@ -127,19 +128,26 @@ export function ShelfView() {
             <p className="text-xs text-gray-400 mt-1">{displayedBooks.length} books</p>
           </div>
         </div>
-        {!currentShelf?.is_default && (
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => {
-              if (confirm(`Delete shelf "${currentShelf?.name}"? Books won't be removed from your library.`))
-                deleteShelf.mutate()
-            }}
-            loading={deleteShelf.isPending}
-          >
-            <Trash2 size={14} /> Delete Shelf
-          </Button>
-        )}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {currentShelf && (
+            <Button variant="secondary" size="sm" onClick={() => setShowEditShelf(true)}>
+              <Edit3 size={14} /> Edit Shelf
+            </Button>
+          )}
+          {!currentShelf?.is_default && (
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                if (confirm(`Delete shelf "${currentShelf?.name}"? Books won't be removed from your library.`))
+                  deleteShelf.mutate()
+              }}
+              loading={deleteShelf.isPending}
+            >
+              <Trash2 size={14} /> Delete Shelf
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Cross-shelf query panel */}
@@ -236,6 +244,7 @@ export function ShelfView() {
       )}
 
       <CreateShelfModal open={showCreateShelf} onClose={() => setShowCreateShelf(false)} />
+      <CreateShelfModal open={showEditShelf} onClose={() => setShowEditShelf(false)} shelf={currentShelf} />
     </div>
   )
 }

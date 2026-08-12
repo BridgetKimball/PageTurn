@@ -28,3 +28,16 @@ column holding that absolute value; existing rows stay `null` (their
 alter table public.reading_sessions
   add column if not exists current_page integer;
 ```
+
+## 003 — Shelf folders
+
+Lets shelves be grouped into folders in the sidebar. A plain text column
+rather than a separate table — folders are created/renamed just by typing a
+name on a shelf, the same lightweight pattern this app already uses for
+custom Goodreads shelves and challenge genre filters. `null` means "no
+folder", unchanged from every existing shelf's current state.
+
+```sql
+alter table public.shelves
+  add column if not exists folder text;
+```
