@@ -93,6 +93,13 @@ interface ParsedRow {
   status: ReadingStatus
   customShelfNames: string[]
   googleBooksId: string
+  // Only populated when re-importing PageTurn's own export — Goodreads
+  // exports never include these, so they stay undefined for that path.
+  coverUrl?: string | null
+  description?: string | null
+  genres?: string[]
+  publisher?: string | null
+  isFavorite?: boolean
 }
 
 function parseGoodreadsRows(text: string): ParsedRow[] {
@@ -177,8 +184,78 @@ async function chunked<T, R>(items: T[], fn: (chunk: T[]) => Promise<R>): Promis
   return results
 }
 
+// ─── PageTurn's own export format (full round-trip: covers, descriptions, etc.) ──
+
+/** PageTurn's export has these exact columns; Goodreads' native export never
+ * has "authors" (plural) or "google_books_id", so this reliably tells the
+ * two formats apart. */
+function isPageTurnFormat(headers: string[]): boolean {
+  return headers.includes('authors') && headers.includes('status') && headers.includes('google_books_id')
+}
+
+function parsePageTurnRows(text: string): ParsedRow[] {
+  const rows = parseCsv(text)
+  if (rows.length < 2) return []
+
+  const headers = rows[0].map((h) => h.trim().toLowerCase())
+  const col = (name: string) => headers.indexOf(name)
+
+  const idx = {
+    title: col('title'),
+    authors: col('authors'),
+    status: col('status'),
+    rating: col('rating'),
+    isFavorite: col('is_favorite'),
+    pageCount: col('page_count'),
+    dateFinished: col('date_finished'),
+    genres: col('genres'),
+    review: col('review'),
+    isbn: col('isbn'),
+    publisher: col('publisher'),
+    coverUrl: col('cover_url'),
+    description: col('description'),
+    googleBooksId: col('google_books_id'),
+  }
+  if (idx.title === -1) throw new Error('Could not find a "title" column.')
+
+  return rows.slice(1).filter((r) => r.length > 1 && r[idx.title]?.trim()).map((r) => {
+    const get = (i: number) => (i >= 0 ? r[i] ?? '' : '')
+
+    const title = get(idx.title).trim()
+    const authors = get(idx.authors).split(';').map((a) => a.trim()).filter(Boolean)
+    const ratingRaw = parseInt(get(idx.rating), 10)
+    const pagesRaw = parseInt(get(idx.pageCount), 10)
+    const status = (['want_to_read', 'reading', 'read'] as const).includes(get(idx.status).trim() as ReadingStatus)
+      ? (get(idx.status).trim() as ReadingStatus)
+      : 'want_to_read'
+
+    const googleBooksId = get(idx.googleBooksId).trim() || `goodreads-${hashString(title + '|' + (authors[0] ?? ''))}`
+
+    return {
+      title,
+      authors,
+      isbn: cleanIsbn(get(idx.isbn)) || get(idx.isbn).trim() || null,
+      pageCount: Number.isFinite(pagesRaw) && pagesRaw > 0 ? pagesRaw : null,
+      publishedYear: null,
+      rating: ratingRaw >= 1 && ratingRaw <= 5 ? ratingRaw : null,
+      dateFinished: normalizeDate(get(idx.dateFinished)) || (get(idx.dateFinished).trim() || null),
+      dateAdded: null,
+      review: get(idx.review).trim() || null,
+      status,
+      customShelfNames: [],
+      googleBooksId,
+      coverUrl: get(idx.coverUrl).trim() || null,
+      description: get(idx.description).trim() || null,
+      genres: get(idx.genres).split(';').map((g) => g.trim()).filter(Boolean),
+      publisher: get(idx.publisher).trim() || null,
+      isFavorite: get(idx.isFavorite).trim().toLowerCase() === 'true',
+    }
+  })
+}
+
 export async function importGoodreadsCsv(userId: string, csvText: string): Promise<ImportSummary> {
-  const parsed = parseGoodreadsRows(csvText)
+  const headerRow = parseCsv(csvText)[0]?.map((h) => h.trim().toLowerCase()) ?? []
+  const parsed = isPageTurnFormat(headerRow) ? parsePageTurnRows(csvText) : parseGoodreadsRows(csvText)
   const summary: ImportSummary = { totalRows: parsed.length, imported: 0, skipped: 0, shelvesCreated: 0, errors: [] }
   if (!parsed.length) return summary
 
@@ -195,13 +272,13 @@ export async function importGoodreadsCsv(userId: string, csvText: string): Promi
           google_books_id: row.googleBooksId,
           title: row.title,
           authors: row.authors,
-          cover_url: null,
-          description: null,
-          genres: [],
+          cover_url: row.coverUrl ?? null,
+          description: row.description ?? null,
+          genres: row.genres ?? [],
           page_count: row.pageCount,
           published_date: row.publishedYear,
           isbn: row.isbn,
-          publisher: null,
+          publisher: row.publisher ?? null,
         })),
         { onConflict: 'google_books_id' }
       )
@@ -264,6 +341,7 @@ export async function importGoodreadsCsv(userId: string, csvText: string): Promi
           book_id: bookId,
           status: row.status,
           rating: row.rating,
+          is_favorite: row.isFavorite ?? false,
           current_page: 0,
           date_started: null,
           date_finished: row.dateFinished,

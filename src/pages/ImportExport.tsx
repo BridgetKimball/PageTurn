@@ -58,6 +58,7 @@ export function ImportExport() {
       authors: ub.book?.authors.join('; ') ?? '',
       status: ub.status,
       rating: ub.rating ?? '',
+      is_favorite: ub.is_favorite ? 'true' : '',
       current_page: ub.current_page ?? '',
       page_count: ub.book?.page_count ?? '',
       date_started: ub.date_started ?? '',
@@ -65,6 +66,9 @@ export function ImportExport() {
       genres: ub.book?.genres.join('; ') ?? '',
       review: ub.review ?? '',
       isbn: ub.book?.isbn ?? '',
+      publisher: ub.book?.publisher ?? '',
+      cover_url: ub.book?.cover_url ?? '',
+      description: ub.book?.description ?? '',
       google_books_id: ub.book?.google_books_id ?? '',
     }))
     const csv = toCSV(rows)
@@ -144,8 +148,10 @@ export function ImportExport() {
           <div className="flex-1">
             <h2 className="font-semibold text-gray-900 mb-1">Export Library</h2>
             <p className="text-sm text-gray-500 mb-4">
-              Download your entire library as a CSV file. Includes titles, authors, ratings,
-              reading status, reviews, and dates.
+              Download your entire library as a CSV file — a full backup including titles, authors, ratings,
+              favorites, reading status, reviews, dates, and any covers/genres/descriptions found by
+              "Fix Missing Covers." This file can be re-uploaded through Import below to restore everything
+              exactly, without needing to look anything up again.
             </p>
             <div className="flex items-center gap-3">
               <Button onClick={handleExport} loading={exportLoading} variant="secondary">
@@ -167,15 +173,21 @@ export function ImportExport() {
             <Upload size={22} />
           </div>
           <div className="flex-1">
-            <h2 className="font-semibold text-gray-900 mb-1">Import from Goodreads</h2>
+            <h2 className="font-semibold text-gray-900 mb-1">Import a Library</h2>
             <p className="text-sm text-gray-500 mb-2">
-              Export your Goodreads library (My Books → Export), then upload the CSV here.
+              Accepts a Goodreads export (My Books → Export) or a CSV previously downloaded from
+              "Export Library" above — detected automatically.
             </p>
             <ol className="text-xs text-gray-500 list-decimal list-inside mb-4 space-y-1">
-              <li>Go to <strong>goodreads.com</strong> → My Books</li>
-              <li>Scroll to the bottom → click <strong>Export Library</strong></li>
-              <li>Upload the downloaded CSV below</li>
+              <li>Goodreads: go to <strong>goodreads.com</strong> → My Books → scroll down → <strong>Export Library</strong></li>
+              <li>PageTurn: use a CSV from "Export Library" above — restores covers/genres without any lookups</li>
+              <li>Upload the CSV below</li>
             </ol>
+            <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-4">
+              Re-importing an older PageTurn export will overwrite current cover/genre/description data for
+              matching books with whatever was in that file — best for restoring into a fresh library, not
+              merging into one you've since improved.
+            </p>
 
             <input
               ref={fileRef}
