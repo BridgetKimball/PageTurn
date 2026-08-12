@@ -68,6 +68,32 @@ async function getAuthorNames(authorRefs: { author: { key: string } }[]): Promis
   return names.filter((n): n is string => !!n)
 }
 
+/**
+ * Open Library's cover-by-ISBN endpoint is a direct, unambiguous lookup — no
+ * title-matching confidence needed, since an ISBN (unlike a fuzzy title
+ * search) can't accidentally resolve to a different book. Useful as a
+ * fallback for self-published/small-press titles that don't show up in
+ * either catalog's text search index at all but still have a cover keyed by
+ * ISBN. Confirmed via curl: `default=false` 404s for an ISBN with no cover,
+ * though a handful of garbage ISBNs in Open Library's own data (e.g. all
+ * zeros) still resolve to an unrelated real cover — reject ISBNs that are
+ * obviously not real (wrong length, or every digit the same) before trying.
+ */
+export async function coverUrlForIsbn(isbn: string): Promise<string | null> {
+  const cleaned = isbn.replace(/[^0-9Xx]/g, '').toUpperCase()
+  if (!/^(\d{9}[\dX]|\d{13})$/.test(cleaned)) return null
+  if (/^(.)\1+$/.test(cleaned.replace(/X$/, '0'))) return null
+
+  const url = `https://covers.openlibrary.org/b/isbn/${cleaned}-L.jpg?default=false`
+  try {
+    const response = await fetchWithTimeout(url)
+    if (response.ok && (response.headers.get('content-type') ?? '').startsWith('image/')) return url
+  } catch {
+    // Network failure or timeout — treat the same as "no cover found".
+  }
+  return null
+}
+
 export async function getOpenLibraryBookById(olid: string): Promise<Book | null> {
   const response = await fetchWithTimeout(`${BASE_URL}/works/${olid}.json`)
   if (!response.ok) return null

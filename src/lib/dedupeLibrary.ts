@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { deduplicateCovers } from './backfillCovers'
 import { matchKey as titleAuthorKey } from './titleMatch'
 import type { ReadingStatus } from '../types'
 
@@ -6,6 +7,7 @@ export interface DedupeResult {
   groupsMerged: number
   entriesRemoved: number
   mergedTitles: string[]
+  coversCleared: number
 }
 
 interface BookRow {
@@ -120,8 +122,16 @@ async function mergeGroup(userId: string, canonicalBookId: string, duplicateBook
  * author, typically from Goodreads cataloging different editions as
  * separate entries) and merges them into one, keeping the union of ratings/
  * reviews/status/shelf membership rather than discarding either copy's data.
+ *
+ * Also clears "duplicate covers" of the other kind: two genuinely different
+ * books that ended up sharing the same cover_url from a past bad title
+ * match (see deduplicateCovers in backfillCovers.ts). That's a distinct bug
+ * from the edition-merging above, but a user thinks of both as "duplicates"
+ * — running one cleanup should catch both.
  */
 export async function dedupeLibraryBooks(userId: string): Promise<DedupeResult> {
+  const { cleared: coversCleared } = await deduplicateCovers(userId)
+
   const { data: ubRows } = await supabase
     .from('user_books')
     .select('book:books(*)')
@@ -156,5 +166,5 @@ export async function dedupeLibraryBooks(userId: string): Promise<DedupeResult> 
     mergedTitles.push(`${canonical.title} (${duplicates.length + 1} copies → 1)`)
   }
 
-  return { groupsMerged, entriesRemoved, mergedTitles }
+  return { groupsMerged, entriesRemoved, mergedTitles, coversCleared }
 }

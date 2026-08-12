@@ -297,10 +297,12 @@ export function ImportExport() {
             <p className="text-sm text-gray-500 mb-4">
               Looks up each book in your library that's missing a cover (mainly ones imported from Goodreads,
               which doesn't export cover images) via Google Books or Open Library, and fills in the cover —
-              plus genre, description, and page count if those are blank too. Also checks for two books
-              incorrectly sharing the same cover and clears them for re-matching. Runs automatically right
-              after every Goodreads import; use this button to re-run it any time. For a large library this
-              can take several minutes — stay on this page until it finishes.
+              plus genre, description, and page count if those are blank too. If a title search can't find a
+              confident match, it falls back to a direct ISBN cover lookup, which catches some self-published/
+              small-press titles that don't turn up in either catalog's search index at all. Also checks for
+              two books incorrectly sharing the same cover and clears them for re-matching. Runs automatically
+              right after every Goodreads import; use this button to re-run it any time. For a large library
+              this can take several minutes — stay on this page until it finishes.
             </p>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -395,7 +397,10 @@ export function ImportExport() {
               separate entries, each with its own ISBN — importing your library can carry that split over as
               two copies of what you consider one book. This finds books with a matching title and author,
               merges them into one (keeping the best rating, review, status, and shelf memberships from
-              either copy), and removes the extra.
+              either copy), and removes the extra. It also checks for a different kind of duplicate: two
+              genuinely different books that ended up sharing the same cover image from a past bad match
+              (e.g. "The Queen's Assassin" and "The Queen's Secret" showing the same cover) — those get
+              cleared so "Fix Missing Covers" above can re-match them correctly.
             </p>
 
             <Button variant="secondary" onClick={runDedupe} loading={dedupeStatus === 'running'}>
@@ -406,9 +411,14 @@ export function ImportExport() {
               <div className="mt-4 space-y-2">
                 <div className="p-3 rounded-lg bg-green-50 text-green-700 text-sm flex items-start gap-2">
                   <CheckCircle2 size={15} className="flex-shrink-0 mt-0.5" />
-                  {dedupeResult.groupsMerged === 0
+                  {dedupeResult.groupsMerged === 0 && dedupeResult.coversCleared === 0
                     ? 'No duplicates found.'
-                    : `Merged ${dedupeResult.entriesRemoved} duplicate ${dedupeResult.entriesRemoved === 1 ? 'entry' : 'entries'} across ${dedupeResult.groupsMerged} book${dedupeResult.groupsMerged === 1 ? '' : 's'}.`}
+                    : [
+                        dedupeResult.groupsMerged > 0 &&
+                          `Merged ${dedupeResult.entriesRemoved} duplicate ${dedupeResult.entriesRemoved === 1 ? 'entry' : 'entries'} across ${dedupeResult.groupsMerged} book${dedupeResult.groupsMerged === 1 ? '' : 's'}.`,
+                        dedupeResult.coversCleared > 0 &&
+                          `Cleared ${dedupeResult.coversCleared} wrongly-shared cover${dedupeResult.coversCleared === 1 ? '' : 's'} — re-run "Fix Missing Covers" above to find the right ones.`,
+                      ].filter(Boolean).join(' ')}
                 </div>
                 {dedupeResult.mergedTitles.length > 0 && (
                   <div className="p-3 rounded-lg bg-gray-50 text-gray-600 text-xs space-y-1 max-h-40 overflow-y-auto">

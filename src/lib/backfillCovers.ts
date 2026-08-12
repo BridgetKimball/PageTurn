@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { searchBooks } from './bookSearch'
+import { coverUrlForIsbn } from './openLibrary'
 import { stripSeriesSuffix, titleConfidence, MATCH_THRESHOLD } from './titleMatch'
 
 export interface NoMatchSample {
@@ -140,68 +141,106 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
     return searchBooks(query, 5)
   }
 
+  function bestMatch(results: Awaited<ReturnType<typeof trySearch>>, title: string) {
+    const scored = results
+      .map((r) => ({ result: r, score: titleConfidence(r.title, title) }))
+      .sort((a, b) => b.score - a.score)
+    const best = scored[0]
+    return { best, match: best && best.score >= MATCH_THRESHOLD ? best.result : null }
+  }
+
   async function processOne(book: BookRow) {
     const strippedTitle = stripSeriesSuffix(book.title)
     const author = book.authors[0] ?? ''
-    const primarySearch = `${strippedTitle} ${author}`.trim()
 
     try {
-      let results = await trySearch(primarySearch)
-      let searchedAs = primarySearch
+      // Primary: title alone — the same query the Search Books page effectively
+      // runs. Confidence is scored on title text only (never author), so
+      // appending the author to the query buys nothing for correctness but
+      // can silently zero out real results: Open Library often indexes an
+      // author under a different name (pen name vs. legal name, middle
+      // initials, joined co-author strings) and treats a multi-term query as
+      // an AND, so one mismatched term kills the whole search even when the
+      // title matches perfectly. Confirmed directly: "The Enchanted Sonata"
+      // alone finds it; adding "Heather Dixon" (vs. Open Library's indexed
+      // "Heather Louise Wallwork") returns zero results.
+      let results = await trySearch(strippedTitle)
+      let searchedAs = strippedTitle
 
       if (!results.length) {
         const fragment = primaryTitleFragment(strippedTitle)
         if (fragment) {
-          const fallbackQuery = `${fragment} ${author}`.trim()
-          const fallbackResults = await trySearch(fallbackQuery)
-          if (fallbackResults.length) {
-            results = fallbackResults
-            searchedAs = fallbackQuery
+          const fragmentResults = await trySearch(fragment)
+          if (fragmentResults.length) {
+            results = fragmentResults
+            searchedAs = fragment
           }
         }
       }
 
-      if (!results.length) {
-        recordNoMatch({ title: book.title, searchedAs, resultCount: 0, topResultTitle: null })
+      let { best, match } = bestMatch(results, book.title)
+
+      // Only fall back to appending the author when the title-only search
+      // didn't land a confident match — e.g. a common title shared by
+      // several different books, where the author is genuinely needed to
+      // find the right one among the top results.
+      if (!match && author) {
+        const withAuthor = `${strippedTitle} ${author}`.trim()
+        const authorResults = await trySearch(withAuthor)
+        if (authorResults.length) {
+          const authorAttempt = bestMatch(authorResults, book.title)
+          if (authorAttempt.match) {
+            results = authorResults
+            searchedAs = withAuthor
+            best = authorAttempt.best
+            match = authorAttempt.match
+          }
+        }
+      }
+
+      if (match && match.cover_url && !assignedCoverUrls.has(match.cover_url)) {
+        const { error } = await supabase
+          .from('books')
+          .update({
+            cover_url: match.cover_url,
+            genres: book.genres?.length ? book.genres : match.genres,
+            description: book.description ?? match.description,
+            page_count: book.page_count ?? match.page_count,
+            isbn: book.isbn ?? match.isbn,
+            publisher: book.publisher ?? match.publisher,
+          })
+          .eq('id', book.id)
+
+        if (error) {
+          failed++
+          recordError(`Saving "${book.title}": ${error.message}`)
+        } else {
+          assignedCoverUrls.add(match.cover_url)
+          updated++
+        }
         return
       }
 
-      const scored = results
-        .map((r) => ({ result: r, score: titleConfidence(r.title, book.title) }))
-        .sort((a, b) => b.score - a.score)
-      const best = scored[0]
-
-      if (!best || best.score < MATCH_THRESHOLD) {
-        recordNoMatch({ title: book.title, searchedAs, resultCount: results.length, topResultTitle: best?.result.title ?? null })
-        return
+      // Text search found nothing confident — try a direct ISBN cover lookup.
+      // Unambiguous (no title-matching risk), and catches self-published/
+      // small-press books that are entirely absent from both catalogs'
+      // search index but still have a cover keyed by ISBN.
+      if (book.isbn) {
+        const isbnCover = await coverUrlForIsbn(book.isbn)
+        if (isbnCover && !assignedCoverUrls.has(isbnCover)) {
+          const { error } = await supabase.from('books').update({ cover_url: isbnCover }).eq('id', book.id)
+          if (error) {
+            failed++
+            recordError(`Saving "${book.title}": ${error.message}`)
+          } else {
+            assignedCoverUrls.add(isbnCover)
+            updated++
+          }
+          return
+        }
       }
 
-      const match = best.result
-
-      if (!match.cover_url || assignedCoverUrls.has(match.cover_url)) {
-        recordNoMatch({ title: book.title, searchedAs, resultCount: results.length, topResultTitle: match.title })
-        return
-      }
-
-      const { error } = await supabase
-        .from('books')
-        .update({
-          cover_url: match.cover_url,
-          genres: book.genres?.length ? book.genres : match.genres,
-          description: book.description ?? match.description,
-          page_count: book.page_count ?? match.page_count,
-          isbn: book.isbn ?? match.isbn,
-          publisher: book.publisher ?? match.publisher,
-        })
-        .eq('id', book.id)
-
-      if (error) {
-        failed++
-        recordError(`Saving "${book.title}": ${error.message}`)
-      } else {
-        assignedCoverUrls.add(match.cover_url)
-        updated++
-      }
+      recordNoMatch({ title: book.title, searchedAs, resultCount: results.length, topResultTitle: best?.result.title ?? null })
     } catch (err) {
       failed++
       recordError(`Searching "${book.title}": ${err instanceof Error ? err.message : 'unknown error'}`)
