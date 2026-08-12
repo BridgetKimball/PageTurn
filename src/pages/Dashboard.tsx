@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { BookOpen, Star, Trophy, Flame, Target, TrendingUp } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -32,6 +33,7 @@ function StatCard({ icon, label, value, sub }: { icon: React.ReactNode; label: s
 
 export function Dashboard() {
   const { user, profile } = useAuth()
+  const [statsPeriod, setStatsPeriod] = useState<'month' | 'year'>('year')
 
   const { data: userBooks = [] } = useQuery<UserBook[]>({
     queryKey: ['user_books', user?.id],
@@ -86,17 +88,29 @@ export function Dashboard() {
     },
   })
 
-  const thisYear = new Date().getFullYear()
+  const now = new Date()
+  const thisYear = now.getFullYear()
+  const thisMonth = now.getMonth()
   const booksRead = userBooks.filter((ub) => ub.status === 'read')
   const currentlyReading = userBooks.filter((ub) => ub.status === 'reading')
-  const booksThisYear = booksRead.filter(
-    (ub) => ub.date_finished && new Date(ub.date_finished).getFullYear() === thisYear
-  )
-  const totalPages = sessions.reduce((sum, s) => sum + (s.pages_read ?? 0), 0)
-  const avgRating =
-    booksRead.filter((b) => b.rating).length > 0
-      ? (booksRead.reduce((sum, b) => sum + (b.rating ?? 0), 0) / booksRead.filter((b) => b.rating).length).toFixed(1)
-      : '—'
+
+  // Stats row scopes to whichever period tab is active; everything else on
+  // the page (charts, streak) stays all-time/real-time regardless of tab.
+  function inStatsPeriod(dateStr: string | null) {
+    if (!dateStr) return false
+    const d = new Date(dateStr)
+    if (d.getFullYear() !== thisYear) return false
+    return statsPeriod === 'year' || d.getMonth() === thisMonth
+  }
+
+  const booksReadInPeriod = booksRead.filter((ub) => inStatsPeriod(ub.date_finished))
+  const periodPages = sessions
+    .filter((s) => inStatsPeriod(s.date))
+    .reduce((sum, s) => sum + (s.pages_read ?? 0), 0)
+  const periodRated = booksReadInPeriod.filter((b) => b.rating)
+  const periodAvgRating = periodRated.length
+    ? (periodRated.reduce((sum, b) => sum + (b.rating ?? 0), 0) / periodRated.length).toFixed(1)
+    : '—'
 
   // Monthly read data for this year
   const monthlyData = Array.from({ length: 12 }, (_, i) => {
@@ -147,11 +161,26 @@ export function Dashboard() {
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={<BookOpen size={22} />} label="Books Read" value={booksRead.length} sub={`${booksThisYear.length} this year`} />
-        <StatCard icon={<TrendingUp size={22} />} label="Pages Read" value={totalPages.toLocaleString()} />
-        <StatCard icon={<Star size={22} />} label="Avg Rating" value={avgRating} />
-        <StatCard icon={<Flame size={22} />} label="Day Streak" value={streak} sub={streak > 0 ? 'Keep it up!' : 'Log a session to start'} />
+      <div className="space-y-3">
+        <div className="flex rounded-lg border border-parchment-200 bg-white overflow-hidden w-fit">
+          {(['month', 'year'] as const).map((p) => (
+            <button
+              key={p}
+              onClick={() => setStatsPeriod(p)}
+              className={`px-4 py-2 text-sm font-medium transition-colors
+                ${statsPeriod === p ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-parchment-50'}`}
+            >
+              {p === 'month' ? 'This Month' : 'This Year'}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard icon={<BookOpen size={22} />} label="Books Read" value={booksReadInPeriod.length} sub={`${booksRead.length} all-time`} />
+          <StatCard icon={<TrendingUp size={22} />} label="Pages Read" value={periodPages.toLocaleString()} />
+          <StatCard icon={<Star size={22} />} label="Avg Rating" value={periodAvgRating} />
+          <StatCard icon={<Flame size={22} />} label="Day Streak" value={streak} sub={streak > 0 ? 'Keep it up!' : 'Log a session to start'} />
+        </div>
       </div>
 
       {/* Charts */}
