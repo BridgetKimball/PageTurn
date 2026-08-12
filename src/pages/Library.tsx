@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Library as LibraryIcon, Search } from 'lucide-react'
+import { Library as LibraryIcon, Search, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import type { UserBook, ReadingStatus } from '../types'
+import type { UserBook, ReadingStatus, Shelf } from '../types'
 import { BookCard } from '../components/books/BookCard'
 import { EmptyState } from '../components/ui/EmptyState'
 import { Button } from '../components/ui/Button'
@@ -22,11 +22,12 @@ export function Library() {
   const [activeStatus, setActiveStatus] = useState<ReadingStatus | 'all'>('all')
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<'added' | 'title' | 'author' | 'rating'>('added')
+  const [selectedShelfIds, setSelectedShelfIds] = useState<string[]>([])
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE)
-  }, [activeStatus, search, sortBy])
+  }, [activeStatus, search, sortBy, selectedShelfIds])
 
   const { data: userBooks = [], isLoading } = useQuery<UserBook[]>({
     queryKey: ['user_books', user?.id],
@@ -41,8 +42,47 @@ export function Library() {
     },
   })
 
+  const { data: shelves = [] } = useQuery<Shelf[]>({
+    queryKey: ['shelves', user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('shelves')
+        .select('*')
+        .eq('user_id', user!.id)
+        .order('is_default', { ascending: false })
+        .order('created_at', { ascending: true })
+      return data ?? []
+    },
+  })
+
+  // shelf_books has no FK relationship to user_books (only to shelves/books/
+  // auth.users — see CLAUDE.md), so it can't be embedded in the userBooks
+  // select above. Fetch shelf membership separately and merge client-side.
+  const { data: shelfMemberships = [] } = useQuery<{ book_id: string; shelf_id: string }[]>({
+    queryKey: ['shelf_books_membership', user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data } = await supabase.from('shelf_books').select('book_id, shelf_id').eq('user_id', user!.id)
+      return data ?? []
+    },
+  })
+
+  const shelfIdsByBookId = new Map<string, Set<string>>()
+  for (const { book_id, shelf_id } of shelfMemberships) {
+    if (!shelfIdsByBookId.has(book_id)) shelfIdsByBookId.set(book_id, new Set())
+    shelfIdsByBookId.get(book_id)!.add(shelf_id)
+  }
+
+  function toggleShelf(shelfId: string) {
+    setSelectedShelfIds((prev) => (prev.includes(shelfId) ? prev.filter((s) => s !== shelfId) : [...prev, shelfId]))
+  }
+
   const filtered = userBooks
     .filter((ub) => activeStatus === 'all' || ub.status === activeStatus)
+    // Same intersection semantics as the Cross-Shelf Query on a shelf's own
+    // page: selecting multiple shelves narrows to books on all of them.
+    .filter((ub) => selectedShelfIds.length === 0 || selectedShelfIds.every((sid) => shelfIdsByBookId.get(ub.book_id)?.has(sid)))
     .filter((ub) => {
       if (!search) return true
       const q = search.toLowerCase()
@@ -106,6 +146,31 @@ export function Library() {
         </select>
       </div>
 
+      {shelves.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-gray-500">Shelves:</span>
+          {shelves.map((shelf) => (
+            <button
+              key={shelf.id}
+              onClick={() => toggleShelf(shelf.id)}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors
+                ${selectedShelfIds.includes(shelf.id)
+                  ? 'text-white border-transparent'
+                  : 'border-parchment-200 text-gray-600 hover:bg-parchment-50'}`}
+              style={selectedShelfIds.includes(shelf.id) ? { backgroundColor: shelf.color, borderColor: shelf.color } : {}}
+            >
+              {selectedShelfIds.includes(shelf.id) && <X size={11} />}
+              {shelf.name}
+            </button>
+          ))}
+          {selectedShelfIds.length > 0 && (
+            <button onClick={() => setSelectedShelfIds([])} className="text-xs text-primary-600 hover:text-primary-800 hover:underline ml-1">
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
       {isLoading ? (
         <div className="flex items-center justify-center py-20">
           <div className="animate-spin w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full" />
@@ -113,8 +178,12 @@ export function Library() {
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<LibraryIcon size={48} />}
-          title={search ? 'No matching books' : 'Your library is empty'}
-          description={search ? 'Try different search terms.' : 'Search for books and add them to your library to get started.'}
+          title={search || selectedShelfIds.length > 0 ? 'No matching books' : 'Your library is empty'}
+          description={
+            search || selectedShelfIds.length > 0
+              ? 'Try different search terms or shelves.'
+              : 'Search for books and add them to your library to get started.'
+          }
         />
       ) : (
         <>
