@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, ChevronLeft, Calendar, BookMarked, Edit3, Plus, Heart } from 'lucide-react'
+import { BookOpen, ChevronLeft, Calendar, BookMarked, Edit3, Plus, Heart, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { getBookById } from '../lib/bookSearch'
@@ -119,6 +119,16 @@ export function BookDetail() {
       qc.invalidateQueries({ queryKey: ['reading_sessions'] })
       setShowSessionModal(false)
       setSessionCurrentPage(''); setSessionNotes('')
+    },
+  })
+
+  const deleteSession = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await supabase.from('reading_sessions').delete().eq('id', sessionId)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['reading_sessions_book'] })
+      qc.invalidateQueries({ queryKey: ['reading_sessions'] })
     },
   })
 
@@ -357,14 +367,26 @@ export function BookDetail() {
             ) : (
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {sessions.map((s) => (
-                  <div key={s.id} className="flex items-start justify-between py-2 border-b border-parchment-100 last:border-0">
+                  <div key={s.id} className="flex items-start justify-between py-2 border-b border-parchment-100 last:border-0 group">
                     <div>
                       <p className="text-sm font-medium text-gray-700">{s.pages_read} pages</p>
                       {s.notes && <p className="text-xs text-gray-500 mt-0.5">{s.notes}</p>}
                     </div>
-                    <span className="text-xs text-gray-400 flex-shrink-0 ml-4">
-                      {new Date(s.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </span>
+                    <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+                      <span className="text-xs text-gray-400">
+                        {new Date(s.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </span>
+                      <button
+                        onClick={() => {
+                          if (confirm('Delete this reading session?')) deleteSession.mutate(s.id)
+                        }}
+                        disabled={deleteSession.isPending && deleteSession.variables === s.id}
+                        title="Delete session"
+                        className="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
