@@ -17,6 +17,7 @@ export function Challenges() {
   const qc = useQueryClient()
   const [filter, setFilter] = useState<Filter>('active')
   const [showCreate, setShowCreate] = useState(false)
+  const [editingChallenge, setEditingChallenge] = useState<Challenge | null>(null)
 
   const { data: challenges = [], isLoading } = useQuery<Challenge[]>({
     queryKey: ['challenges', user?.id, 'all'],
@@ -129,6 +130,7 @@ export function Challenges() {
             <ChallengeCard
               key={c.id}
               challenge={c}
+              onEdit={setEditingChallenge}
               onDelete={handleDelete}
               deleting={deleteChallenge.isPending && deleteChallenge.variables === c.id}
             />
@@ -136,7 +138,11 @@ export function Challenges() {
         </div>
       )}
 
-      <CreateChallengeModal open={showCreate} onClose={() => setShowCreate(false)} />
+      <CreateChallengeModal
+        open={showCreate || !!editingChallenge}
+        challenge={editingChallenge}
+        onClose={() => { setShowCreate(false); setEditingChallenge(null) }}
+      />
     </div>
   )
 }

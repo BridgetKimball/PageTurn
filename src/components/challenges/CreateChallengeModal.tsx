@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
-import type { ChallengeLength } from '../../types'
+import { resyncChallengeBooks } from '../../lib/challenges'
+import type { Challenge, ChallengeLength } from '../../types'
 import { Modal } from '../ui/Modal'
 import { Input } from '../ui/Input'
 import { Button } from '../ui/Button'
@@ -10,6 +11,11 @@ import { Button } from '../ui/Button'
 interface CreateChallengeModalProps {
   open: boolean
   onClose: () => void
+  challenge?: Challenge | null
+}
+
+function todayStr() {
+  return new Date().toISOString().split('T')[0]
 }
 
 const LENGTHS: { value: ChallengeLength; label: string; days: number }[] = [
@@ -25,52 +31,93 @@ const COMMON_GENRES = [
   'Horror', "Children's", 'Young Adult', 'Poetry', 'Religion',
 ]
 
-export function CreateChallengeModal({ open, onClose }: CreateChallengeModalProps) {
+export function CreateChallengeModal({ open, onClose, challenge }: CreateChallengeModalProps) {
   const { user } = useAuth()
   const qc = useQueryClient()
+  const isEditing = !!challenge
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [lengthType, setLengthType] = useState<ChallengeLength>('month')
+  const [startDate, setStartDate] = useState(todayStr())
   const [customEnd, setCustomEnd] = useState('')
   const [targetCount, setTargetCount] = useState('12')
   const [genreFilter, setGenreFilter] = useState('')
   const [customGenre, setCustomGenre] = useState('')
 
-  function computeDates() {
-    const start = new Date().toISOString().split('T')[0]
-    if (lengthType === 'custom') return { start, end: customEnd }
+  // Populate from the challenge being edited, or reset to defaults for a
+  // fresh create, any time the modal opens.
+  useEffect(() => {
+    if (!open) return
+    if (challenge) {
+      setTitle(challenge.title)
+      setDescription(challenge.description ?? '')
+      setLengthType(challenge.length_type)
+      setStartDate(challenge.start_date)
+      setCustomEnd(challenge.end_date)
+      setTargetCount(String(challenge.target_count))
+      if (!challenge.genre_filter) {
+        setGenreFilter(''); setCustomGenre('')
+      } else if (COMMON_GENRES.includes(challenge.genre_filter)) {
+        setGenreFilter(challenge.genre_filter)
+      } else {
+        setGenreFilter('custom'); setCustomGenre(challenge.genre_filter)
+      }
+    } else {
+      setTitle(''); setDescription(''); setLengthType('month')
+      setStartDate(todayStr()); setCustomEnd('')
+      setTargetCount('12'); setGenreFilter(''); setCustomGenre('')
+    }
+  }, [open, challenge])
+
+  function computeEndDate(start: string) {
+    if (lengthType === 'custom') return customEnd
     const selected = LENGTHS.find((l) => l.value === lengthType)!
-    const endDate = new Date()
-    endDate.setDate(endDate.getDate() + selected.days)
-    return { start, end: endDate.toISOString().split('T')[0] }
+    const end = new Date(start)
+    end.setDate(end.getDate() + selected.days)
+    return end.toISOString().split('T')[0]
   }
 
-  const create = useMutation({
+  const save = useMutation({
     mutationFn: async () => {
-      const { start, end } = computeDates()
+      const end = computeEndDate(startDate)
       const genre = genreFilter === 'custom' ? customGenre : genreFilter || null
-      await supabase.from('challenges').insert({
-        user_id: user!.id,
+      const payload = {
         title: title || `Read ${targetCount} books`,
         description: description || null,
         length_type: lengthType,
-        start_date: start,
+        start_date: startDate,
         end_date: end,
         target_count: parseInt(targetCount),
         genre_filter: genre,
-        status: 'active',
-      })
+      }
+
+      let challengeId: string
+      if (isEditing) {
+        challengeId = challenge!.id
+        await supabase.from('challenges').update(payload).eq('id', challengeId)
+      } else {
+        const { data, error } = await supabase
+          .from('challenges')
+          .insert({ ...payload, user_id: user!.id, status: 'active' })
+          .select('id')
+          .single()
+        if (error || !data) throw error ?? new Error('Failed to create challenge')
+        challengeId = data.id
+      }
+
+      // A start date in the past (edited or set at creation) should pick up
+      // books already finished in that window, not just ones finished from
+      // here on out.
+      await resyncChallengeBooks(user!.id, challengeId)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['challenges'] })
       onClose()
-      setTitle(''); setDescription(''); setLengthType('month')
-      setTargetCount('12'); setGenreFilter(''); setCustomGenre('')
     },
   })
 
   return (
-    <Modal open={open} onClose={onClose} title="Create Reading Challenge" size="md">
+    <Modal open={open} onClose={onClose} title={isEditing ? 'Edit Challenge' : 'Create Reading Challenge'} size="md">
       <div className="space-y-4">
         <Input
           label="Challenge Title"
@@ -103,17 +150,24 @@ export function CreateChallengeModal({ open, onClose }: CreateChallengeModalProp
               </button>
             ))}
           </div>
-          {lengthType === 'custom' && (
-            <div className="mt-2">
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <Input
+              label="Start Date"
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              hint="Can be in the past — already-finished books in range will count"
+            />
+            {lengthType === 'custom' && (
               <Input
                 label="End Date"
                 type="date"
                 value={customEnd}
                 onChange={(e) => setCustomEnd(e.target.value)}
-                min={new Date().toISOString().split('T')[0]}
+                min={startDate}
               />
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         <Input
@@ -163,15 +217,19 @@ export function CreateChallengeModal({ open, onClose }: CreateChallengeModalProp
           )}
         </div>
 
+        {save.isError && (
+          <p className="text-xs text-red-600">Something went wrong saving this challenge. Try again in a moment.</p>
+        )}
+
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" onClick={onClose} className="flex-1">Cancel</Button>
           <Button
-            onClick={() => create.mutate()}
-            loading={create.isPending}
-            disabled={!targetCount || (lengthType === 'custom' && !customEnd)}
+            onClick={() => save.mutate()}
+            loading={save.isPending}
+            disabled={!targetCount || !startDate || (lengthType === 'custom' && !customEnd)}
             className="flex-1"
           >
-            Create Challenge
+            {isEditing ? 'Save Changes' : 'Create Challenge'}
           </Button>
         </div>
       </div>

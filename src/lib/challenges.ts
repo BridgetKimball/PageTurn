@@ -80,6 +80,52 @@ async function recomputeChallengeCompletion(userId: string, challengeIds: string
 }
 
 /**
+ * Re-evaluates one challenge's linked books from scratch against its
+ * current criteria. Needed after editing a challenge — syncChallengeLinksForUserBook
+ * only runs when a *book* changes, not when the challenge's own start/end
+ * date or genre filter changes, so e.g. moving a challenge's start date
+ * earlier wouldn't otherwise pick up books already finished in that window.
+ */
+export async function resyncChallengeBooks(userId: string, challengeId: string): Promise<void> {
+  const { data: challenge } = await supabase
+    .from('challenges')
+    .select('id, start_date, end_date, target_count, genre_filter')
+    .eq('id', challengeId)
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (!challenge) return
+
+  await supabase.from('challenge_books').delete().eq('challenge_id', challengeId).eq('user_id', userId)
+
+  const { data: readBooks } = await supabase
+    .from('user_books')
+    .select('id, date_finished, book:books(genres)')
+    .eq('user_id', userId)
+    .eq('status', 'read')
+    .not('date_finished', 'is', null)
+    .gte('date_finished', challenge.start_date)
+    .lte('date_finished', challenge.end_date)
+
+  const matching = (readBooks ?? []).filter((ub) =>
+    genreMatches(challenge.genre_filter, (ub.book as { genres?: string[] } | null)?.genres ?? [])
+  )
+
+  if (matching.length) {
+    await supabase.from('challenge_books').insert(
+      matching.map((ub) => ({ challenge_id: challengeId, user_book_id: ub.id, user_id: userId }))
+    )
+  }
+
+  const today = new Date().toISOString().split('T')[0]
+  const met = matching.length >= challenge.target_count
+  const expired = challenge.end_date < today
+  await supabase
+    .from('challenges')
+    .update({ status: met ? 'completed' : expired ? 'failed' : 'active' })
+    .eq('id', challengeId)
+}
+
+/**
  * Lazily sweeps a user's active challenges: anything past its end_date gets
  * marked 'completed' (if it hit target) or 'failed' (if not). Safe to call
  * on every Challenges/Dashboard page load — cheap no-op when nothing's expired.

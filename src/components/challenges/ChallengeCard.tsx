@@ -1,4 +1,4 @@
-import { Trophy, Calendar, BookOpen, Trash2 } from 'lucide-react'
+import { Trophy, Calendar, BookOpen, Trash2, Edit3 } from 'lucide-react'
 import type { Challenge } from '../../types'
 import { Badge } from '../ui/Badge'
 
@@ -19,11 +19,12 @@ const STATUS_VARIANT = {
 
 interface ChallengeCardProps {
   challenge: Challenge
+  onEdit?: (challenge: Challenge) => void
   onDelete?: (challenge: Challenge) => void
   deleting?: boolean
 }
 
-export function ChallengeCard({ challenge, onDelete, deleting }: ChallengeCardProps) {
+export function ChallengeCard({ challenge, onEdit, onDelete, deleting }: ChallengeCardProps) {
   const completed = challenge.books_completed ?? 0
   const pct = Math.min(100, (completed / challenge.target_count) * 100)
   const remaining = daysLeft(challenge.end_date)
@@ -46,6 +47,15 @@ export function ChallengeCard({ challenge, onDelete, deleting }: ChallengeCardPr
           <Badge variant={STATUS_VARIANT[challenge.status]}>
             {challenge.status.charAt(0).toUpperCase() + challenge.status.slice(1)}
           </Badge>
+          {onEdit && (
+            <button
+              onClick={() => onEdit(challenge)}
+              title="Edit challenge"
+              className="p-1 rounded text-gray-300 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+            >
+              <Edit3 size={14} />
+            </button>
+          )}
           {onDelete && (
             <button
               onClick={() => onDelete(challenge)}
