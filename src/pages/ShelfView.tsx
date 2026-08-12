@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { BookMarked, Trash2, Filter, X, Plus } from 'lucide-react'
@@ -10,6 +10,8 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { Button } from '../components/ui/Button'
 import { CreateShelfModal } from '../components/shelves/CreateShelfModal'
 
+const PAGE_SIZE = 60
+
 // Cross-shelf query: user can select additional shelves and see their intersection
 export function ShelfView() {
   const { id } = useParams<{ id: string }>()
@@ -19,6 +21,11 @@ export function ShelfView() {
   const [crossShelves, setCrossShelves] = useState<string[]>([])
   const [showCreateShelf, setShowCreateShelf] = useState(false)
   const [genreFilter, setGenreFilter] = useState('')
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [id, crossShelves, genreFilter])
 
   const { data: allShelves = [] } = useQuery<Shelf[]>({
     queryKey: ['shelves', user?.id],
@@ -212,11 +219,20 @@ export function ShelfView() {
           description="Add books from Search or your Library by selecting this shelf."
         />
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {displayedBooks.map((sb) => (
-            <BookCard key={sb.id} book={sb.book!} userBook={sb.user_book} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            {displayedBooks.slice(0, visibleCount).map((sb) => (
+              <BookCard key={sb.id} book={sb.book!} userBook={sb.user_book} />
+            ))}
+          </div>
+          {visibleCount < displayedBooks.length && (
+            <div className="flex justify-center pt-2">
+              <Button variant="secondary" onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}>
+                Load More ({displayedBooks.length - visibleCount} remaining)
+              </Button>
+            </div>
+          )}
+        </>
       )}
 
       <CreateShelfModal open={showCreateShelf} onClose={() => setShowCreateShelf(false)} />

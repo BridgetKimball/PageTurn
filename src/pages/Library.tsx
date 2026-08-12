@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Library as LibraryIcon, Search } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext'
 import type { UserBook, ReadingStatus } from '../types'
 import { BookCard } from '../components/books/BookCard'
 import { EmptyState } from '../components/ui/EmptyState'
+import { Button } from '../components/ui/Button'
 
 const STATUS_TABS: { value: ReadingStatus | 'all'; label: string }[] = [
   { value: 'all', label: 'All Books' },
@@ -14,11 +15,18 @@ const STATUS_TABS: { value: ReadingStatus | 'all'; label: string }[] = [
   { value: 'read', label: 'Read' },
 ]
 
+const PAGE_SIZE = 60
+
 export function Library() {
   const { user } = useAuth()
   const [activeStatus, setActiveStatus] = useState<ReadingStatus | 'all'>('all')
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<'added' | 'title' | 'author' | 'rating'>('added')
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [activeStatus, search, sortBy])
 
   const { data: userBooks = [], isLoading } = useQuery<UserBook[]>({
     queryKey: ['user_books', user?.id],
@@ -112,10 +120,17 @@ export function Library() {
         <>
           <p className="text-sm text-gray-500">{filtered.length} book{filtered.length !== 1 ? 's' : ''}</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-            {filtered.map((ub) => (
+            {filtered.slice(0, visibleCount).map((ub) => (
               <BookCard key={ub.id} book={ub.book!} userBook={ub} />
             ))}
           </div>
+          {visibleCount < filtered.length && (
+            <div className="flex justify-center pt-2">
+              <Button variant="secondary" onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}>
+                Load More ({filtered.length - visibleCount} remaining)
+              </Button>
+            </div>
+          )}
         </>
       )}
     </div>

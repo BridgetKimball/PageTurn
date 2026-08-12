@@ -281,6 +281,19 @@ export function ImportExport() {
                     {backfillResult.sampleErrors.map((err, i) => <p key={i}>• {err}</p>)}
                   </div>
                 )}
+                {backfillResult.noMatchSamples.length > 0 && (
+                  <div className="p-3 rounded-lg bg-gray-50 text-gray-600 text-xs space-y-1.5 max-h-48 overflow-y-auto">
+                    <p className="font-medium">Sample no-match books (for troubleshooting):</p>
+                    {backfillResult.noMatchSamples.map((s, i) => (
+                      <div key={i} className="border-b border-gray-200 pb-1 last:border-0">
+                        <p>"{s.title}" → searched as "{s.searchedAs}"</p>
+                        <p className="text-gray-400">
+                          {s.resultCount === 0 ? 'zero search results' : `${s.resultCount} results, top match "${s.topResultTitle}" had no cover`}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

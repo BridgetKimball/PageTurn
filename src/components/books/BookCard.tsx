@@ -49,6 +49,8 @@ export function BookCard({ book, userBook, onAdd, compact = false }: BookCardPro
           <img
             src={book.cover_url}
             alt={`${book.title} cover`}
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           />
         ) : (

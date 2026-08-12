@@ -1,12 +1,20 @@
 import { supabase } from './supabase'
 import { searchBooks } from './bookSearch'
 
+export interface NoMatchSample {
+  title: string
+  searchedAs: string
+  resultCount: number
+  topResultTitle: string | null
+}
+
 export interface BackfillResult {
   total: number
   updated: number
   failed: number
   noMatch: number
   sampleErrors: string[]
+  noMatchSamples: NoMatchSample[]
 }
 
 export type BackfillProgress = (done: number, total: number) => void
@@ -85,30 +93,40 @@ function delay(ms: number) {
  */
 export async function backfillMissingCovers(userId: string, onProgress?: BackfillProgress): Promise<BackfillResult> {
   const { data: ubRows, error: ubError } = await supabase.from('user_books').select('book_id').eq('user_id', userId)
-  if (ubError) return { total: 0, updated: 0, failed: 0, noMatch: 0, sampleErrors: [`Loading library: ${ubError.message}`] }
+  if (ubError) {
+    return { total: 0, updated: 0, failed: 0, noMatch: 0, sampleErrors: [`Loading library: ${ubError.message}`], noMatchSamples: [] }
+  }
 
   const bookIds = Array.from(new Set((ubRows ?? []).map((r) => r.book_id)))
-  if (!bookIds.length) return { total: 0, updated: 0, failed: 0, noMatch: 0, sampleErrors: [] }
+  if (!bookIds.length) return { total: 0, updated: 0, failed: 0, noMatch: 0, sampleErrors: [], noMatchSamples: [] }
 
   const { rows: candidates, errors: fetchErrors } = await fetchCandidates(bookIds)
-  if (!candidates.length) return { total: 0, updated: 0, failed: 0, noMatch: 0, sampleErrors: fetchErrors }
+  if (!candidates.length) {
+    return { total: 0, updated: 0, failed: 0, noMatch: 0, sampleErrors: fetchErrors, noMatchSamples: [] }
+  }
 
   let done = 0
   let updated = 0
   let failed = 0
   let noMatch = 0
   const sampleErrors: string[] = [...fetchErrors]
+  const noMatchSamples: NoMatchSample[] = []
 
   function recordError(message: string) {
     if (sampleErrors.length < 5 && !sampleErrors.includes(message)) sampleErrors.push(message)
   }
 
+  function recordNoMatch(sample: NoMatchSample) {
+    noMatch++
+    if (noMatchSamples.length < 10) noMatchSamples.push(sample)
+  }
+
   async function processOne(book: BookRow) {
+    const searchedAs = `${stripSeriesSuffix(book.title)} ${book.authors[0] ?? ''}`.trim()
     try {
-      const query = `${stripSeriesSuffix(book.title)} ${book.authors[0] ?? ''}`.trim()
-      const results = await searchBooks(query, 5)
+      const results = await searchBooks(searchedAs, 5)
       if (!results.length) {
-        noMatch++
+        recordNoMatch({ title: book.title, searchedAs, resultCount: 0, topResultTitle: null })
         return
       }
       // Prefer a result whose title clearly matches; fall back to the
@@ -116,10 +134,15 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
       // APIs already rank by relevance.
       const match = results.find((r) => titlesLikelyMatch(r.title, book.title)) ?? results[0]
 
+      if (!match.cover_url) {
+        recordNoMatch({ title: book.title, searchedAs, resultCount: results.length, topResultTitle: match.title })
+        return
+      }
+
       const { error } = await supabase
         .from('books')
         .update({
-          cover_url: match.cover_url ?? book.cover_url,
+          cover_url: match.cover_url,
           genres: book.genres?.length ? book.genres : match.genres,
           description: book.description ?? match.description,
           page_count: book.page_count ?? match.page_count,
@@ -131,10 +154,8 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
       if (error) {
         failed++
         recordError(`Saving "${book.title}": ${error.message}`)
-      } else if (match.cover_url) {
-        updated++
       } else {
-        noMatch++
+        updated++
       }
     } catch (err) {
       failed++
@@ -155,5 +176,5 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, worker))
 
-  return { total: candidates.length, updated, failed, noMatch, sampleErrors }
+  return { total: candidates.length, updated, failed, noMatch, sampleErrors, noMatchSamples }
 }
