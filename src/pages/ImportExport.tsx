@@ -4,7 +4,7 @@ import { Download, Upload, FileText, AlertCircle, CheckCircle2, ImageOff, Copy }
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { importGoodreadsCsv, parseCsv, type ImportSummary } from '../lib/goodreadsImport'
-import { backfillMissingCovers, type BackfillResult } from '../lib/backfillCovers'
+import { backfillMissingCovers, type BackfillResult, type NoMatchReason } from '../lib/backfillCovers'
 import { dedupeLibraryBooks, type DedupeResult } from '../lib/dedupeLibrary'
 import { applyCoverPatch, isCoverPatchFormat } from '../lib/coverPatch'
 import type { UserBook } from '../types'
@@ -27,6 +27,14 @@ function toCSV(rows: Record<string, string | number | null>[]): string {
     ),
   ]
   return lines.join('\n')
+}
+
+const NO_MATCH_REASON_LABELS: Record<NoMatchReason, string> = {
+  no_results: 'zero search results',
+  low_title_confidence: "closest result's title didn't match closely enough",
+  author_mismatch: 'title matched, but by a different author',
+  no_cover_on_candidate: 'right book and author, but that source has no cover image',
+  cover_already_used: 'right book and author, but that exact cover was already claimed by a different book this run',
 }
 
 export function ImportExport() {
@@ -299,10 +307,13 @@ export function ImportExport() {
               which doesn't export cover images) via Google Books or Open Library, and fills in the cover —
               plus genre, description, and page count if those are blank too. If a title search can't find a
               confident match, it falls back to a direct ISBN cover lookup, which catches some self-published/
-              small-press titles that don't turn up in either catalog's search index at all. Also checks for
-              two books incorrectly sharing the same cover and clears them for re-matching. Runs automatically
-              right after every Goodreads import; use this button to re-run it any time. For a large library
-              this can take several minutes — stay on this page until it finishes.
+              small-press titles that don't turn up in either catalog's search index at all. Every match also
+              has to agree on author, not just title, so a generic title (e.g. two different "The Queen's
+              Secret" books by different authors) can't be confused for the wrong one. Also re-checks existing
+              covers for ones that don't hold up under these rules — shared between two books, or a title
+              match with the wrong author — and clears them for re-matching. Runs automatically right after
+              every Goodreads import; use this button to re-run it any time. For a large library this can take
+              several minutes — stay on this page until it finishes.
             </p>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -346,7 +357,7 @@ export function ImportExport() {
                   <CheckCircle2 size={15} className="flex-shrink-0 mt-0.5" />
                   <span>
                     {backfillResult.duplicatesCleared > 0 &&
-                      `Cleared ${backfillResult.duplicatesCleared} wrongly-shared cover${backfillResult.duplicatesCleared === 1 ? '' : 's'} for re-matching. `}
+                      `Cleared ${backfillResult.duplicatesCleared} cover${backfillResult.duplicatesCleared === 1 ? '' : 's'} that didn't check out (shared with another book, or wrong author) for re-matching. `}
                     Found covers for {backfillResult.updated} of {backfillResult.total} books.
                     {backfillResult.noMatch > 0 && ` ${backfillResult.noMatch} had no confident match.`}
                     {backfillResult.failed > 0 && ` ${backfillResult.failed} hit an error.`}
@@ -365,7 +376,8 @@ export function ImportExport() {
                       <div key={i} className="border-b border-gray-200 pb-1 last:border-0">
                         <p>"{s.title}" → searched as "{s.searchedAs}"</p>
                         <p className="text-gray-400">
-                          {s.resultCount === 0 ? 'zero search results' : `${s.resultCount} results, closest was "${s.topResultTitle}" (not confident enough or already used)`}
+                          {s.resultCount > 0 && `${s.resultCount} result${s.resultCount === 1 ? '' : 's'}, closest was "${s.topResultTitle}" — `}
+                          {NO_MATCH_REASON_LABELS[s.reason]}
                         </p>
                       </div>
                     ))}
@@ -417,7 +429,7 @@ export function ImportExport() {
                         dedupeResult.groupsMerged > 0 &&
                           `Merged ${dedupeResult.entriesRemoved} duplicate ${dedupeResult.entriesRemoved === 1 ? 'entry' : 'entries'} across ${dedupeResult.groupsMerged} book${dedupeResult.groupsMerged === 1 ? '' : 's'}.`,
                         dedupeResult.coversCleared > 0 &&
-                          `Cleared ${dedupeResult.coversCleared} wrongly-shared cover${dedupeResult.coversCleared === 1 ? '' : 's'} — re-run "Fix Missing Covers" above to find the right ones.`,
+                          `Cleared ${dedupeResult.coversCleared} cover${dedupeResult.coversCleared === 1 ? '' : 's'} that didn't check out — re-run "Fix Missing Covers" above to find the right ones.`,
                       ].filter(Boolean).join(' ')}
                 </div>
                 {dedupeResult.mergedTitles.length > 0 && (

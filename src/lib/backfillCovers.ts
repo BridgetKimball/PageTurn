@@ -3,11 +3,19 @@ import { searchBooks } from './bookSearch'
 import { coverUrlForIsbn } from './openLibrary'
 import { stripSeriesSuffix, titleConfidence, authorsAgree, MATCH_THRESHOLD } from './titleMatch'
 
+export type NoMatchReason =
+  | 'no_results'
+  | 'low_title_confidence'
+  | 'author_mismatch'
+  | 'no_cover_on_candidate'
+  | 'cover_already_used'
+
 export interface NoMatchSample {
   title: string
   searchedAs: string
   resultCount: number
   topResultTitle: string | null
+  reason: NoMatchReason
 }
 
 export interface BackfillResult {
@@ -75,25 +83,68 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+const REVALIDATE_CONCURRENCY = 3
+
 /**
- * Repairs damage from an earlier, looser matching heuristic: finds any
- * cover_url shared by more than one of this user's books (a wrong match
- * can't be correct for both) and clears it so the next backfill re-matches
- * them with the stricter logic instead of leaving a confidently-wrong cover.
+ * Repairs damage from an earlier, looser matching heuristic, two ways:
+ *
+ * 1. Any cover_url shared by more than one of this user's books — a wrong
+ *    match can't be correct for both.
+ * 2. A book's own cover that matches a search candidate for its own title
+ *    with confident title text but a *different* author (see authorsAgree
+ *    in titleMatch.ts). This catches matches made before that author check
+ *    existed — e.g. "The Queen's Secret" (Melissa de la Cruz) wrongly
+ *    carrying Victoria Holt's "The Queen's Secret" cover — where the wrong
+ *    cover isn't shared with any other book in this library, so check #1
+ *    alone can't see it. Only clears when the *exact* stored cover_url shows
+ *    up as one of those bad candidates — never a guess based on title alone.
+ *
+ * Either way, clearing lets the next backfill re-match with current logic
+ * instead of leaving a confidently-wrong cover in place.
  */
-export async function deduplicateCovers(userId: string): Promise<{ cleared: number }> {
+export async function deduplicateCovers(userId: string, onProgress?: BackfillProgress): Promise<{ cleared: number }> {
   const { ids: bookIds } = await fetchUserBookIds(userId)
   if (!bookIds.length) return { cleared: 0 }
 
   const { rows } = await fetchBooksByIds(bookIds, false)
+
   const countByUrl = new Map<string, number>()
   for (const b of rows) if (b.cover_url) countByUrl.set(b.cover_url, (countByUrl.get(b.cover_url) ?? 0) + 1)
+  const sharedIds = new Set(rows.filter((b) => b.cover_url && (countByUrl.get(b.cover_url) ?? 0) > 1).map((b) => b.id))
 
-  const duplicateIds = rows.filter((b) => b.cover_url && (countByUrl.get(b.cover_url) ?? 0) > 1).map((b) => b.id)
-  if (!duplicateIds.length) return { cleared: 0 }
+  const candidates = rows.filter((b) => b.cover_url && !sharedIds.has(b.id))
+  const mismatchedIds = new Set<string>()
 
-  await supabase.from('books').update({ cover_url: null }).in('id', duplicateIds)
-  return { cleared: duplicateIds.length }
+  let index = 0
+  let done = 0
+  async function worker() {
+    while (index < candidates.length) {
+      const book = candidates[index++]
+      try {
+        const results = await searchBooks(stripSeriesSuffix(book.title), 5)
+        const badMatch = results.find(
+          (r) =>
+            r.cover_url === book.cover_url &&
+            titleConfidence(r.title, book.title) >= MATCH_THRESHOLD &&
+            !authorsAgree(book.authors, r.authors)
+        )
+        if (badMatch) mismatchedIds.add(book.id)
+      } catch {
+        // Can't confirm this one is bad this run — leave its cover alone
+        // rather than clearing on an unconfirmed guess.
+      }
+      done++
+      onProgress?.(done, candidates.length)
+      await delay(150)
+    }
+  }
+  if (candidates.length) await Promise.all(Array.from({ length: REVALIDATE_CONCURRENCY }, worker))
+
+  const clearIds = [...sharedIds, ...mismatchedIds]
+  if (!clearIds.length) return { cleared: 0 }
+
+  await supabase.from('books').update({ cover_url: null }).in('id', clearIds)
+  return { cleared: clearIds.length }
 }
 
 /**
@@ -111,7 +162,7 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
     total: 0, updated: 0, failed: 0, noMatch: 0, duplicatesCleared: 0, sampleErrors: [], noMatchSamples: [], ...extra,
   })
 
-  const { cleared: duplicatesCleared } = await deduplicateCovers(userId)
+  const { cleared: duplicatesCleared } = await deduplicateCovers(userId, onProgress)
 
   const { ids: bookIds, error: ubError } = await fetchUserBookIds(userId)
   if (ubError) return empty({ sampleErrors: [`Loading library: ${ubError}`] })
@@ -137,8 +188,27 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
     if (noMatchSamples.length < 10) noMatchSamples.push(sample)
   }
 
-  async function trySearch(query: string) {
-    return searchBooks(query, 5)
+  function isAbortError(err: unknown): boolean {
+    return typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'AbortError'
+  }
+
+  // fetchWithTimeout's 15s abort is a real, occasional occurrence under
+  // sustained concurrent load (confirmed: surfaces as "The operation was
+  // aborted." from Open Library specifically — Google Books is 429-dead in
+  // this project, so nearly all real traffic goes through Open Library, and
+  // bookSearch.ts's Google→OL fallback only wraps the Google call, so an OL
+  // abort propagates straight up uncaught). This is transient, not a
+  // permanent constraint, so retry a couple of times before giving up.
+  async function trySearch(query: string, attempt = 1): Promise<Awaited<ReturnType<typeof searchBooks>>> {
+    try {
+      return await searchBooks(query, 5)
+    } catch (err) {
+      if (isAbortError(err) && attempt < 3) {
+        await delay(300 * attempt)
+        return trySearch(query, attempt + 1)
+      }
+      throw err
+    }
   }
 
   // A right-looking title isn't sufficient on its own — a generic title
@@ -146,13 +216,21 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
   // a different author. Requires both title confidence AND author agreement
   // before accepting a candidate; `best` (for no-match diagnostics) still
   // reflects the top title-scored result regardless of author outcome.
+  // `reason` explains a rejection precisely, rather than one vague catch-all:
+  // did nothing clear the title bar at all, or did something clear the
+  // title bar but disagree on author?
   function bestMatch(results: Awaited<ReturnType<typeof trySearch>>, title: string, authors: string[]) {
+    if (!results.length) return { best: undefined, match: null, reason: 'no_results' as NoMatchReason }
     const scored = results
       .map((r) => ({ result: r, score: titleConfidence(r.title, title) }))
       .sort((a, b) => b.score - a.score)
     const best = scored[0]
-    const accepted = scored.find((s) => s.score >= MATCH_THRESHOLD && authorsAgree(authors, s.result.authors))
-    return { best, match: accepted ? accepted.result : null }
+    const titleConfident = scored.filter((s) => s.score >= MATCH_THRESHOLD)
+    const accepted = titleConfident.find((s) => authorsAgree(authors, s.result.authors))
+    const reason: NoMatchReason | null = accepted
+      ? null
+      : titleConfident.length ? 'author_mismatch' : 'low_title_confidence'
+    return { best, match: accepted ? accepted.result : null, reason }
   }
 
   async function processOne(book: BookRow) {
@@ -184,7 +262,7 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
         }
       }
 
-      let { best, match } = bestMatch(results, book.title, book.authors)
+      let { best, match, reason } = bestMatch(results, book.title, book.authors)
 
       // Only fall back to appending the author when the title-only search
       // didn't land a confident match — e.g. a common title shared by
@@ -195,36 +273,46 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
         const authorResults = await trySearch(withAuthor)
         if (authorResults.length) {
           const authorAttempt = bestMatch(authorResults, book.title, book.authors)
-          if (authorAttempt.match) {
+          // The author-appended search is more specific — prefer its verdict
+          // over the title-only attempt's whenever it actually found something
+          // to judge, even if it still didn't land a confident match.
+          if (authorAttempt.best) {
             results = authorResults
             searchedAs = withAuthor
             best = authorAttempt.best
             match = authorAttempt.match
+            reason = authorAttempt.reason
           }
         }
       }
 
-      if (match && match.cover_url && !assignedCoverUrls.has(match.cover_url)) {
-        const { error } = await supabase
-          .from('books')
-          .update({
-            cover_url: match.cover_url,
-            genres: book.genres?.length ? book.genres : match.genres,
-            description: book.description ?? match.description,
-            page_count: book.page_count ?? match.page_count,
-            isbn: book.isbn ?? match.isbn,
-            publisher: book.publisher ?? match.publisher,
-          })
-          .eq('id', book.id)
+      if (match) {
+        if (match.cover_url && !assignedCoverUrls.has(match.cover_url)) {
+          const { error } = await supabase
+            .from('books')
+            .update({
+              cover_url: match.cover_url,
+              genres: book.genres?.length ? book.genres : match.genres,
+              description: book.description ?? match.description,
+              page_count: book.page_count ?? match.page_count,
+              isbn: book.isbn ?? match.isbn,
+              publisher: book.publisher ?? match.publisher,
+            })
+            .eq('id', book.id)
 
-        if (error) {
-          failed++
-          recordError(`Saving "${book.title}": ${error.message}`)
-        } else {
-          assignedCoverUrls.add(match.cover_url)
-          updated++
+          if (error) {
+            failed++
+            recordError(`Saving "${book.title}": ${error.message}`)
+          } else {
+            assignedCoverUrls.add(match.cover_url)
+            updated++
+          }
+          return
         }
-        return
+        // Title and author both check out, but the candidate itself has
+        // no cover image, or another book already claimed this exact one
+        // this run — distinct from "couldn't find a confident match" above.
+        reason = !match.cover_url ? 'no_cover_on_candidate' : 'cover_already_used'
       }
 
       // Text search found nothing confident — try a direct ISBN cover lookup.
@@ -246,7 +334,13 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
         }
       }
 
-      recordNoMatch({ title: book.title, searchedAs, resultCount: results.length, topResultTitle: best?.result.title ?? null })
+      recordNoMatch({
+        title: book.title,
+        searchedAs,
+        resultCount: results.length,
+        topResultTitle: best?.result.title ?? null,
+        reason: reason ?? 'no_results',
+      })
     } catch (err) {
       failed++
       recordError(`Searching "${book.title}": ${err instanceof Error ? err.message : 'unknown error'}`)
