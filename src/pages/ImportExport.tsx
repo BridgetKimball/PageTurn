@@ -1,10 +1,11 @@
 import { useState, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Upload, FileText, AlertCircle, CheckCircle2, ImageOff } from 'lucide-react'
+import { Download, Upload, FileText, AlertCircle, CheckCircle2, ImageOff, Copy } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { importGoodreadsCsv, type ImportSummary } from '../lib/goodreadsImport'
 import { backfillMissingCovers, type BackfillResult } from '../lib/backfillCovers'
+import { dedupeLibraryBooks, type DedupeResult } from '../lib/dedupeLibrary'
 import type { UserBook } from '../types'
 import { Button } from '../components/ui/Button'
 
@@ -38,6 +39,8 @@ export function ImportExport() {
   const [backfillStatus, setBackfillStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
   const [backfillProgress, setBackfillProgress] = useState({ done: 0, total: 0 })
   const [backfillResult, setBackfillResult] = useState<BackfillResult | null>(null)
+  const [dedupeStatus, setDedupeStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [dedupeResult, setDedupeResult] = useState<DedupeResult | null>(null)
 
   const { data: userBooks = [] } = useQuery<UserBook[]>({
     queryKey: ['user_books', user?.id],
@@ -98,6 +101,22 @@ export function ImportExport() {
       qc.invalidateQueries({ queryKey: ['shelf_books'] })
     } catch {
       setBackfillStatus('error')
+    }
+  }
+
+  async function runDedupe() {
+    if (!user) return
+    setDedupeStatus('running')
+    setDedupeResult(null)
+    try {
+      const result = await dedupeLibraryBooks(user.id)
+      setDedupeResult(result)
+      setDedupeStatus('done')
+      qc.invalidateQueries({ queryKey: ['user_books'] })
+      qc.invalidateQueries({ queryKey: ['shelf_books'] })
+      qc.invalidateQueries({ queryKey: ['challenges'] })
+    } catch {
+      setDedupeStatus('error')
     }
   }
 
@@ -312,6 +331,52 @@ export function ImportExport() {
             )}
 
             {backfillStatus === 'error' && (
+              <div className="mt-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm flex items-start gap-2">
+                <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+                Something went wrong. Try again in a moment.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Remove duplicates */}
+      <div className="bg-white rounded-xl border border-parchment-200 p-6">
+        <div className="flex items-start gap-4">
+          <div className="p-3 bg-purple-50 rounded-xl text-purple-600 flex-shrink-0">
+            <Copy size={22} />
+          </div>
+          <div className="flex-1">
+            <h2 className="font-semibold text-gray-900 mb-1">Remove Duplicate Books</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Goodreads catalogs different editions of the same book (hardcover, paperback, a reissue) as
+              separate entries, each with its own ISBN — importing your library can carry that split over as
+              two copies of what you consider one book. This finds books with a matching title and author,
+              merges them into one (keeping the best rating, review, status, and shelf memberships from
+              either copy), and removes the extra.
+            </p>
+
+            <Button variant="secondary" onClick={runDedupe} loading={dedupeStatus === 'running'}>
+              <Copy size={15} /> Scan for Duplicates
+            </Button>
+
+            {dedupeStatus === 'done' && dedupeResult && (
+              <div className="mt-4 space-y-2">
+                <div className="p-3 rounded-lg bg-green-50 text-green-700 text-sm flex items-start gap-2">
+                  <CheckCircle2 size={15} className="flex-shrink-0 mt-0.5" />
+                  {dedupeResult.groupsMerged === 0
+                    ? 'No duplicates found.'
+                    : `Merged ${dedupeResult.entriesRemoved} duplicate ${dedupeResult.entriesRemoved === 1 ? 'entry' : 'entries'} across ${dedupeResult.groupsMerged} book${dedupeResult.groupsMerged === 1 ? '' : 's'}.`}
+                </div>
+                {dedupeResult.mergedTitles.length > 0 && (
+                  <div className="p-3 rounded-lg bg-gray-50 text-gray-600 text-xs space-y-1 max-h-40 overflow-y-auto">
+                    {dedupeResult.mergedTitles.map((t, i) => <p key={i}>• {t}</p>)}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {dedupeStatus === 'error' && (
               <div className="mt-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm flex items-start gap-2">
                 <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
                 Something went wrong. Try again in a moment.
