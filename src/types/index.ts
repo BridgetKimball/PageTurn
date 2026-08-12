@@ -74,6 +74,7 @@ export interface ReadingSession {
   user_book_id: string
   date: string
   pages_read: number
+  current_page: number | null
   notes: string | null
   created_at: string
   user_book?: UserBook

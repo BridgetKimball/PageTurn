@@ -24,6 +24,7 @@ export function BookDetail() {
   const qc = useQueryClient()
   const [showAddModal, setShowAddModal] = useState(false)
   const [showSessionModal, setShowSessionModal] = useState(false)
+  const [editingSession, setEditingSession] = useState<ReadingSession | null>(null)
   const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0])
   const [sessionCurrentPage, setSessionCurrentPage] = useState('')
   const [sessionNotes, setSessionNotes] = useState('')
@@ -92,25 +93,53 @@ export function BookDetail() {
     },
   })
 
-  const logSession = useMutation({
+  // Sessions come back newest-first; chronological order is what matters for
+  // reconstructing "what page was I on right before/after this entry".
+  const chronologicalSessions = [...sessions].sort((a, b) => a.date.localeCompare(b.date))
+
+  const saveSession = useMutation({
     mutationFn: async () => {
-      const previousPage = userBook?.current_page ?? 0
       let newPage = parseInt(sessionCurrentPage)
       if (book?.page_count) newPage = Math.min(newPage, book.page_count)
-      const pagesRead = Math.max(0, newPage - previousPage)
 
-      await supabase.from('reading_sessions').insert({
-        user_id: user!.id,
-        user_book_id: userBook!.id,
-        date: sessionDate,
-        pages_read: pagesRead,
-        notes: sessionNotes || null,
-      })
-      if (userBook) {
+      if (editingSession) {
+        const idx = chronologicalSessions.findIndex((s) => s.id === editingSession.id)
+        const prevPage = idx > 0 ? (chronologicalSessions[idx - 1].current_page ?? 0) : 0
+        const pagesRead = Math.max(0, newPage - prevPage)
+
         await supabase
-          .from('user_books')
-          .update({ current_page: newPage })
-          .eq('id', userBook.id)
+          .from('reading_sessions')
+          .update({ date: sessionDate, current_page: newPage, pages_read: pagesRead, notes: sessionNotes || null })
+          .eq('id', editingSession.id)
+
+        // The next chronological entry's delta was computed against this
+        // session's old page — keep it consistent with the new value.
+        const next = chronologicalSessions[idx + 1]
+        if (next) {
+          const nextPagesRead = Math.max(0, (next.current_page ?? 0) - newPage)
+          await supabase.from('reading_sessions').update({ pages_read: nextPagesRead }).eq('id', next.id)
+        }
+
+        // Only the latest entry actually determines the book's current page.
+        const isLatest = idx === chronologicalSessions.length - 1
+        if (isLatest && userBook) {
+          await supabase.from('user_books').update({ current_page: newPage }).eq('id', userBook.id)
+        }
+      } else {
+        const previousPage = userBook?.current_page ?? 0
+        const pagesRead = Math.max(0, newPage - previousPage)
+
+        await supabase.from('reading_sessions').insert({
+          user_id: user!.id,
+          user_book_id: userBook!.id,
+          date: sessionDate,
+          current_page: newPage,
+          pages_read: pagesRead,
+          notes: sessionNotes || null,
+        })
+        if (userBook) {
+          await supabase.from('user_books').update({ current_page: newPage }).eq('id', userBook.id)
+        }
       }
     },
     onSuccess: () => {
@@ -118,16 +147,28 @@ export function BookDetail() {
       qc.invalidateQueries({ queryKey: ['user_book'] })
       qc.invalidateQueries({ queryKey: ['reading_sessions'] })
       setShowSessionModal(false)
+      setEditingSession(null)
       setSessionCurrentPage(''); setSessionNotes('')
     },
   })
 
   const deleteSession = useMutation({
     mutationFn: async (sessionId: string) => {
+      const idx = chronologicalSessions.findIndex((s) => s.id === sessionId)
+      const isLatest = idx === chronologicalSessions.length - 1
+
       await supabase.from('reading_sessions').delete().eq('id', sessionId)
+
+      // Deleting the most recent entry means the book's current page reverts
+      // to whatever the entry before it recorded.
+      if (isLatest && userBook) {
+        const newLatest = chronologicalSessions[idx - 1]
+        await supabase.from('user_books').update({ current_page: newLatest?.current_page ?? 0 }).eq('id', userBook.id)
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['reading_sessions_book'] })
+      qc.invalidateQueries({ queryKey: ['user_book'] })
       qc.invalidateQueries({ queryKey: ['reading_sessions'] })
     },
   })
@@ -355,7 +396,10 @@ export function BookDetail() {
               </h2>
               {userBook.status === 'reading' && (
                 <Button size="sm" onClick={() => {
+                  setEditingSession(null)
+                  setSessionDate(new Date().toISOString().split('T')[0])
                   setSessionCurrentPage(userBook.current_page ? String(userBook.current_page) : '')
+                  setSessionNotes('')
                   setShowSessionModal(true)
                 }}>
                   <Plus size={13} /> Log Session
@@ -369,13 +413,29 @@ export function BookDetail() {
                 {sessions.map((s) => (
                   <div key={s.id} className="flex items-start justify-between py-2 border-b border-parchment-100 last:border-0 group">
                     <div>
-                      <p className="text-sm font-medium text-gray-700">{s.pages_read} pages</p>
+                      <p className="text-sm font-medium text-gray-700">
+                        {s.pages_read} pages
+                        {s.current_page != null && <span className="text-gray-400 font-normal"> · page {s.current_page}</span>}
+                      </p>
                       {s.notes && <p className="text-xs text-gray-500 mt-0.5">{s.notes}</p>}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0 ml-4">
                       <span className="text-xs text-gray-400">
                         {new Date(s.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                       </span>
+                      <button
+                        onClick={() => {
+                          setEditingSession(s)
+                          setSessionDate(s.date)
+                          setSessionCurrentPage(s.current_page != null ? String(s.current_page) : '')
+                          setSessionNotes(s.notes ?? '')
+                          setShowSessionModal(true)
+                        }}
+                        title="Edit session"
+                        className="text-gray-300 hover:text-primary-600 transition-colors opacity-0 group-hover:opacity-100"
+                      >
+                        <Edit3 size={14} />
+                      </button>
                       <button
                         onClick={() => {
                           if (confirm('Delete this reading session?')) deleteSession.mutate(s.id)
@@ -396,7 +456,12 @@ export function BookDetail() {
       )}
 
       {/* Log Session Modal */}
-      <Modal open={showSessionModal} onClose={() => setShowSessionModal(false)} title="Log Reading Session" size="sm">
+      <Modal
+        open={showSessionModal}
+        onClose={() => { setShowSessionModal(false); setEditingSession(null) }}
+        title={editingSession ? 'Edit Reading Session' : 'Log Reading Session'}
+        size="sm"
+      >
         <div className="space-y-4">
           <div>
             <label className="text-sm font-medium text-gray-700 block mb-1">Date</label>
@@ -444,10 +509,21 @@ export function BookDetail() {
               className="w-full rounded-lg border border-parchment-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none"
             />
           </div>
+          {saveSession.isError && (
+            <p className="text-xs text-red-600">
+              Couldn't save — did you run the reading_sessions current_page migration? See docs/MIGRATIONS.md.
+            </p>
+          )}
           <div className="flex gap-3">
-            <Button variant="secondary" onClick={() => setShowSessionModal(false)} className="flex-1">Cancel</Button>
-            <Button onClick={() => logSession.mutate()} loading={logSession.isPending} disabled={!sessionCurrentPage} className="flex-1">
-              Save Session
+            <Button
+              variant="secondary"
+              onClick={() => { setShowSessionModal(false); setEditingSession(null) }}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button onClick={() => saveSession.mutate()} loading={saveSession.isPending} disabled={!sessionCurrentPage} className="flex-1">
+              {editingSession ? 'Save Changes' : 'Save Session'}
             </Button>
           </div>
         </div>
