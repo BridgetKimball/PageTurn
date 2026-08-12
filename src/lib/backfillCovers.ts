@@ -1,7 +1,7 @@
 import { supabase } from './supabase'
 import { searchBooks } from './bookSearch'
 import { coverUrlForIsbn } from './openLibrary'
-import { stripSeriesSuffix, titleConfidence, MATCH_THRESHOLD } from './titleMatch'
+import { stripSeriesSuffix, titleConfidence, authorsAgree, MATCH_THRESHOLD } from './titleMatch'
 
 export interface NoMatchSample {
   title: string
@@ -141,12 +141,18 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
     return searchBooks(query, 5)
   }
 
-  function bestMatch(results: Awaited<ReturnType<typeof trySearch>>, title: string) {
+  // A right-looking title isn't sufficient on its own — a generic title
+  // ("The Queen's Secret") can collide with a completely different book by
+  // a different author. Requires both title confidence AND author agreement
+  // before accepting a candidate; `best` (for no-match diagnostics) still
+  // reflects the top title-scored result regardless of author outcome.
+  function bestMatch(results: Awaited<ReturnType<typeof trySearch>>, title: string, authors: string[]) {
     const scored = results
       .map((r) => ({ result: r, score: titleConfidence(r.title, title) }))
       .sort((a, b) => b.score - a.score)
     const best = scored[0]
-    return { best, match: best && best.score >= MATCH_THRESHOLD ? best.result : null }
+    const accepted = scored.find((s) => s.score >= MATCH_THRESHOLD && authorsAgree(authors, s.result.authors))
+    return { best, match: accepted ? accepted.result : null }
   }
 
   async function processOne(book: BookRow) {
@@ -178,7 +184,7 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
         }
       }
 
-      let { best, match } = bestMatch(results, book.title)
+      let { best, match } = bestMatch(results, book.title, book.authors)
 
       // Only fall back to appending the author when the title-only search
       // didn't land a confident match — e.g. a common title shared by
@@ -188,7 +194,7 @@ export async function backfillMissingCovers(userId: string, onProgress?: Backfil
         const withAuthor = `${strippedTitle} ${author}`.trim()
         const authorResults = await trySearch(withAuthor)
         if (authorResults.length) {
-          const authorAttempt = bestMatch(authorResults, book.title)
+          const authorAttempt = bestMatch(authorResults, book.title, book.authors)
           if (authorAttempt.match) {
             results = authorResults
             searchedAs = withAuthor

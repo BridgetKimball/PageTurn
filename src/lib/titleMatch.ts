@@ -46,6 +46,27 @@ export function titleConfidence(a: string, b: string): number {
 
 export const MATCH_THRESHOLD = 0.7
 
+export const AUTHOR_MATCH_THRESHOLD = 0.4
+
+/**
+ * A right-looking title isn't enough on its own — generic-sounding titles
+ * ("The Queen's Secret") can collide with a completely different book by a
+ * different author, and titleConfidence has no way to catch that since it
+ * only ever looks at title text. Reuses the same token-overlap approach,
+ * just with a much lower bar than the title check: author name variants
+ * (pen name vs. legal name, a missing middle name, one word vs. a full
+ * name — see "Heather Dixon" vs. Open Library's "Heather Louise Wallwork")
+ * are common and shouldn't cause a false rejection the way they would for
+ * an exact-title comparison. Skips the check (passes) when either side has
+ * no author on file at all — there's nothing to disagree with.
+ */
+export function authorsAgree(bookAuthors: string[], matchAuthors: string[]): boolean {
+  const bookNames = bookAuthors.filter((a) => a.trim())
+  const matchNames = matchAuthors.filter((a) => a.trim())
+  if (!bookNames.length || !matchNames.length) return true
+  return bookNames.some((a) => matchNames.some((b) => titleConfidence(a, b) >= AUTHOR_MATCH_THRESHOLD))
+}
+
 export function matchKey(title: string, author: string): string {
   return `${normalize(stripSeriesSuffix(title))}|${normalize(author)}`
 }
