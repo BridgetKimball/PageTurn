@@ -85,7 +85,7 @@ export function Challenges() {
         </Button>
       </div>
 
-      <div className="flex rounded-lg border border-parchment-200 bg-white overflow-x-auto max-w-full">
+      <div className="flex w-fit rounded-lg border border-parchment-200 bg-white overflow-x-auto max-w-full">
         {tabs.map(({ value, label }) => (
           <button
             key={value}

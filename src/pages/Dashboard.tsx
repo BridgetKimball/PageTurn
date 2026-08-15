@@ -182,7 +182,7 @@ export function Dashboard() {
 
       {/* Stats row */}
       <div className="space-y-3">
-        <div className="flex rounded-lg border border-parchment-200 bg-white overflow-x-auto max-w-full">
+        <div className="flex w-fit rounded-lg border border-parchment-200 bg-white overflow-x-auto max-w-full">
           {(['month', 'year'] as const).map((p) => (
             <button
               key={p}
@@ -207,7 +207,7 @@ export function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-parchment-200 p-5">
           <h2 className="font-semibold text-gray-900 mb-4">Books Read This Year</h2>
-          <ResponsiveContainer width="100%" height={200}>
+          <ResponsiveContainer width="100%" height={220}>
             <BarChart data={monthlyData}>
               <XAxis dataKey="month" tick={{ fontSize: 12 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
@@ -220,15 +220,22 @@ export function Dashboard() {
         <div className="bg-white rounded-xl border border-parchment-200 p-5">
           <h2 className="font-semibold text-gray-900 mb-4">Genre Breakdown</h2>
           {genreData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={220}>
               <PieChart>
-                <Pie data={genreData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75}>
+                <Pie data={genreData} dataKey="value" nameKey="name" cx="35%" cy="50%" outerRadius={70}>
                   {genreData.map((_, i) => (
                     <Cell key={i} fill={GENRE_COLORS[i % GENRE_COLORS.length]} />
                   ))}
                 </Pie>
                 <Tooltip />
-                <Legend iconSize={10} iconType="circle" />
+                {/* Side legend, not below the pie — a bottom legend competes
+                    with the pie for the container's vertical space, and with
+                    8 (possibly long) genre names wrapping to several rows it
+                    could shrink the pie's available area below its fixed
+                    outerRadius, clipping or (confirmed while testing) even
+                    fully hiding the pie. A side legend only costs horizontal
+                    space, which this 2-column layout has plenty of. */}
+                <Legend iconSize={10} iconType="circle" layout="vertical" verticalAlign="middle" align="right" />
               </PieChart>
             </ResponsiveContainer>
           ) : (
