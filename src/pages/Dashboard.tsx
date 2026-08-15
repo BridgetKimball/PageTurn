@@ -92,7 +92,14 @@ export function Dashboard() {
   const thisYear = now.getFullYear()
   const thisMonth = now.getMonth()
   const booksRead = userBooks.filter((ub) => ub.status === 'read')
-  const currentlyReading = userBooks.filter((ub) => ub.status === 'reading')
+  // Furthest-along book first; books with no page count (indeterminate
+  // progress) sort last rather than tying with a book that's just started.
+  function progressOf(ub: UserBook) {
+    return ub.book?.page_count ? ub.current_page / ub.book.page_count : -1
+  }
+  const currentlyReading = userBooks
+    .filter((ub) => ub.status === 'reading')
+    .sort((a, b) => progressOf(b) - progressOf(a))
 
   // Stats row scopes to whichever period tab is active; everything else on
   // the page (charts, streak) stays all-time/real-time regardless of tab.
@@ -105,10 +112,21 @@ export function Dashboard() {
 
   const booksReadInPeriod = booksRead.filter((ub) => inStatsPeriod(ub.date_finished))
 
-  // A book's pages only count once it's actually finished — an in-progress
-  // book's current page (tracked via Log Session on its own page) shouldn't
-  // move this total, so this deliberately doesn't look at reading_sessions.
-  const periodPages = booksReadInPeriod.reduce((sum, ub) => sum + (ub.book?.page_count ?? 0), 0)
+  // Pages read in the period come from logged reading sessions (so an
+  // in-progress book's pages count as soon as they're logged, not only once
+  // the book is finished). Books finished in the period but never logged via
+  // a session at all (e.g. imported directly, or marked read without ever
+  // using Log Session) have no session data to draw from, so those fall back
+  // to the book's full page_count — guarded by "no sessions ever", not just
+  // "no sessions in period", so a book's pages aren't double-counted once
+  // it's being tracked via sessions.
+  const bookIdsWithAnySession = new Set(sessions.map((s) => s.user_book_id))
+  const sessionsPagesInPeriod = sessions
+    .filter((s) => inStatsPeriod(s.date))
+    .reduce((sum, s) => sum + (s.pages_read ?? 0), 0)
+  const finishedWithoutSessions = booksReadInPeriod.filter((ub) => !bookIdsWithAnySession.has(ub.id))
+  const fallbackPages = finishedWithoutSessions.reduce((sum, ub) => sum + (ub.book?.page_count ?? 0), 0)
+  const periodPages = sessionsPagesInPeriod + fallbackPages
   const periodRated = booksReadInPeriod.filter((b) => b.rating)
   const periodAvgRating = periodRated.length
     ? (periodRated.reduce((sum, b) => sum + (b.rating ?? 0), 0) / periodRated.length).toFixed(1)

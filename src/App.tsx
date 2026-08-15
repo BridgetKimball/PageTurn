@@ -12,6 +12,7 @@ import { Challenges } from './pages/Challenges'
 import { ImportExport } from './pages/ImportExport'
 import { Profile } from './pages/Profile'
 import { CreateShelfPage } from './pages/CreateShelfPage'
+import { NotFound } from './pages/NotFound'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
@@ -54,7 +55,7 @@ export default function App() {
                 <Route path="/challenges" element={<Challenges />} />
                 <Route path="/import" element={<ImportExport />} />
                 <Route path="/profile" element={<Profile />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
+                <Route path="*" element={<NotFound />} />
               </Routes>
             </Layout>
           </AuthGuard>
