@@ -10,8 +10,8 @@ PageTurn — a personal reading tracker (better Goodreads). React + TypeScript +
 Supabase (Postgres + Auth) as the backend, deployed as a static site to GitHub Pages via GitHub
 Actions. No custom server — everything is client-side calls to Supabase or external book APIs.
 
-Live: https://bridgetkimball.github.io/pageturn/
-Repo: https://github.com/BridgetKimball/pageturn
+Live: https://bridgetkimball.github.io/PageTurn/
+Repo: https://github.com/BridgetKimball/PageTurn
 
 ## Do this before touching book-search or cover code
 
@@ -65,20 +65,31 @@ serving every result.
   one-off.** A job reporting `success` does not mean the new bundle is live yet. Verify with a
   cache-busted fetch of the actual site, not by trusting the Actions UI:
   ```bash
-  curl -s "https://bridgetkimball.github.io/pageturn/?v=$(date +%s)" | grep -o 'index-[A-Za-z0-9_-]*\.js'
+  curl -s "https://bridgetkimball.github.io/PageTurn/?v=$(date +%s)" | grep -o 'index-[A-Za-z0-9_-]*\.js'
   ```
   Compare the hash to the previous known one before concluding a change is live.
 - **The GitHub Actions web UI (and even the top-level run status from the API) caches/lags too.**
   When checking run status, query the jobs endpoint directly rather than trusting a list view:
   ```bash
-  RUN_ID=$(curl -s "https://api.github.com/repos/BridgetKimball/pageturn/actions/runs?per_page=1" | python3 -c "import json,sys; print(json.load(sys.stdin)['workflow_runs'][0]['id'])")
-  curl -s "https://api.github.com/repos/BridgetKimball/pageturn/actions/runs/$RUN_ID/jobs" | python3 -c "
+  RUN_ID=$(curl -s "https://api.github.com/repos/BridgetKimball/PageTurn/actions/runs?per_page=1" | python3 -c "import json,sys; print(json.load(sys.stdin)['workflow_runs'][0]['id'])")
+  curl -s "https://api.github.com/repos/BridgetKimball/PageTurn/actions/runs/$RUN_ID/jobs" | python3 -c "
   import json,sys
   for j in json.load(sys.stdin)['jobs']: print(j['name'], j['status'], j.get('conclusion'))"
   ```
 - `HashRouter` is used deliberately (not `BrowserRouter`) — GitHub Pages can't rewrite arbitrary
   paths back to `index.html`, so a plain path would 404 on refresh.
-- `vite.config.ts` sets `base: '/pageturn/'` to match the repo name (served from a subpath).
+- `vite.config.ts` sets `base: '/PageTurn/'` to match the repo name (served from a subpath).
+- **GitHub Pages URLs are case-sensitive and follow the *current* repo name — a repo rename
+  changes the live path immediately, and the old-case URL and the mismatched-case built assets
+  both 404.** Hit this for real: the repo was renamed from `pageturn` to `PageTurn` (case only)
+  mid-session, which silently moved the live site from `.../pageturn/` to `.../PageTurn/`. The
+  push and Actions run both succeeded, but the deployed `index.html` still referenced
+  `/pageturn/assets/...` (from `vite.config.ts`'s stale `base`), so the *new* URL loaded a blank
+  page (JS/CSS 404) while the *old* URL 404'd outright. `gh api repos/OWNER/REPO/pages` (fetch,
+  not the repo's own URL) tells you the actual current `html_url` — check it any time the site is
+  fully blank/unreachable after a deploy that Actions reports as green, not just a slow-CDN
+  situation. If the repo gets renamed again, `base` in `vite.config.ts` (and the manifest's
+  `start_url`/`scope`/`navigateFallbackDenylist`) need to change to match.
 
 ## Mobile / PWA
 

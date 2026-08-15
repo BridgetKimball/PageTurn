@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
-  base: '/pageturn/',
+  base: '/PageTurn/',
   plugins: [
     react(),
     VitePWA({
@@ -17,8 +17,8 @@ export default defineConfig({
         background_color: '#fdfbf7',
         display: 'standalone',
         orientation: 'portrait',
-        start_url: '/pageturn/',
-        scope: '/pageturn/',
+        start_url: '/PageTurn/',
+        scope: '/PageTurn/',
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
@@ -28,7 +28,7 @@ export default defineConfig({
       // Google Books/Open Library calls must always hit the network — never
       // serve a cached search result. Only the app shell is precached.
       workbox: {
-        navigateFallbackDenylist: [/^\/pageturn\/api/],
+        navigateFallbackDenylist: [/^\/PageTurn\/api/],
         runtimeCaching: [
           {
             urlPattern: ({ url }) =>

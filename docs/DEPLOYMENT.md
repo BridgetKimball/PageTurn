@@ -9,7 +9,7 @@ GitHub Pages serves static files only — your `.env` values need to be baked in
 build at compile time, and that build happens on GitHub's servers, not yours. So your
 keys need to live as **repository secrets** rather than in the code.
 
-1. Go to your repo: `https://github.com/BridgetKimball/pageturn`
+1. Go to your repo: `https://github.com/BridgetKimball/PageTurn`
 2. **Settings** → **Secrets and variables** → **Actions**
 3. Click **New repository secret** and add each of these (same values as your local `.env`):
    - `VITE_SUPABASE_URL`
@@ -39,13 +39,13 @@ Go to the **Actions** tab in your repo — you'll see a "Deploy to GitHub Pages"
 Once it's green, go back to **Settings → Pages** and you'll see your live URL:
 
 ```
-https://bridgetkimball.github.io/pageturn/
+https://bridgetkimball.github.io/PageTurn/
 ```
 
 ## 4. Add the Pages URL to Supabase's allowed redirect URLs
 
 1. In your Supabase project: **Authentication** → **URL Configuration**
-2. Set **Site URL** to `https://bridgetkimball.github.io/pageturn/`
+2. Set **Site URL** to `https://bridgetkimball.github.io/PageTurn/`
 3. Under **Redirect URLs**, add the same URL
 
 This matters for password-reset links and email confirmations to point back to the right place.
@@ -73,9 +73,9 @@ and challenge — but the login itself remains (an empty account someone could s
 
 ## Notes on this setup
 
-- **Routing:** the app uses `HashRouter` (URLs look like `.../pageturn/#/library`) instead of
+- **Routing:** the app uses `HashRouter` (URLs look like `.../PageTurn/#/library`) instead of
   `BrowserRouter`, because GitHub Pages can't rewrite arbitrary paths back to `index.html`.
   A plain path-based URL would 404 on refresh; the hash avoids that entirely.
-- **Base path:** `vite.config.ts` sets `base: '/pageturn/'` to match the repo name, since the
-  site is served from a subpath (`username.github.io/pageturn/`), not the domain root.
+- **Base path:** `vite.config.ts` sets `base: '/PageTurn/'` to match the repo name, since the
+  site is served from a subpath (`username.github.io/PageTurn/`), not the domain root.
 - **Redeploying:** every push to `main` re-runs the workflow automatically. No manual build/upload step.
