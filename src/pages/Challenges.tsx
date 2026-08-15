@@ -72,7 +72,7 @@ export function Challenges() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold font-serif text-gray-900 mb-1 flex items-center gap-2">
             <Trophy size={22} className="text-amber-500" />
@@ -85,12 +85,12 @@ export function Challenges() {
         </Button>
       </div>
 
-      <div className="flex rounded-lg border border-parchment-200 bg-white overflow-hidden w-fit">
+      <div className="flex rounded-lg border border-parchment-200 bg-white overflow-x-auto max-w-full">
         {tabs.map(({ value, label }) => (
           <button
             key={value}
             onClick={() => setFilter(value)}
-            className={`px-4 py-2 text-sm font-medium transition-colors
+            className={`px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap
               ${filter === value ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-parchment-50'}`}
           >
             {label}

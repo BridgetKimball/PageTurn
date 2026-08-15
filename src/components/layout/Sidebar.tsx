@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutDashboard, Search, Library, Trophy, Download, Plus, Folder, ChevronRight, ChevronDown,
+  LayoutDashboard, Search, Library, Trophy, Download, Plus, Folder, ChevronRight, ChevronDown, X,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -27,7 +27,12 @@ function loadCollapsedFolders(): Set<string> {
   }
 }
 
-export function Sidebar() {
+interface SidebarProps {
+  open: boolean
+  onClose: () => void
+}
+
+export function Sidebar({ open, onClose }: SidebarProps) {
   const { user } = useAuth()
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(loadCollapsedFolders)
 
@@ -63,7 +68,7 @@ export function Sidebar() {
 
   function renderShelfLink(shelf: Shelf) {
     return (
-      <NavLink key={shelf.id} to={`/shelves/${shelf.id}`} className={linkClass}>
+      <NavLink key={shelf.id} to={`/shelves/${shelf.id}`} className={linkClass} onClick={onClose}>
         <span
           className="w-2.5 h-2.5 rounded-full flex-shrink-0"
           style={{ backgroundColor: shelf.color }}
@@ -80,10 +85,31 @@ export function Sidebar() {
   const unfiledShelves = shelves.filter((s) => !s.folder)
 
   return (
-    <aside className="fixed left-0 top-16 bottom-0 w-64 bg-white border-r border-parchment-200 overflow-y-auto">
-      <nav className="p-4 space-y-1">
+    <>
+      {open && (
+        <div
+          className="fixed inset-0 top-[var(--header-h)] z-30 bg-black/40 md:hidden"
+          onClick={onClose}
+        />
+      )}
+      <aside
+        className={`fixed left-0 top-[var(--header-h)] bottom-0 z-30 w-64 bg-white border-r border-parchment-200
+          overflow-y-auto transition-transform duration-200 ease-out
+          md:translate-x-0
+          ${open ? 'translate-x-0' : '-translate-x-full'}`}
+      >
+        <div className="flex items-center justify-between p-4 md:hidden">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Menu</span>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-parchment-100"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <nav className="p-4 pt-0 md:pt-4 space-y-1">
         {navItems.map(({ to, label, icon: Icon }) => (
-          <NavLink key={to} to={to} end={to === '/'} className={linkClass}>
+          <NavLink key={to} to={to} end={to === '/'} className={linkClass} onClick={onClose}>
             <Icon size={18} />
             {label}
           </NavLink>
@@ -96,6 +122,7 @@ export function Sidebar() {
               to="/shelves/new"
               className="p-1 rounded text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
               title="Create shelf"
+              onClick={onClose}
             >
               <Plus size={14} />
             </NavLink>
@@ -132,7 +159,8 @@ export function Sidebar() {
             <p className="px-3 text-xs text-gray-400 italic">No shelves yet</p>
           )}
         </div>
-      </nav>
-    </aside>
+        </nav>
+      </aside>
+    </>
   )
 }

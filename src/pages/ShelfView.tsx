@@ -117,11 +117,11 @@ export function ShelfView() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-4 h-4 rounded-full mt-1" style={{ backgroundColor: currentShelf?.color ?? '#ccc' }} />
-          <div>
-            <h1 className="text-2xl font-bold font-serif text-gray-900">{currentShelf?.name ?? '…'}</h1>
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-4 h-4 rounded-full mt-1 flex-shrink-0" style={{ backgroundColor: currentShelf?.color ?? '#ccc' }} />
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold font-serif text-gray-900 truncate">{currentShelf?.name ?? '…'}</h1>
             {currentShelf?.description && (
               <p className="text-gray-500 text-sm mt-0.5">{currentShelf.description}</p>
             )}

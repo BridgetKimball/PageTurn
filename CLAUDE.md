@@ -80,6 +80,32 @@ serving every result.
   paths back to `index.html`, so a plain path would 404 on refresh.
 - `vite.config.ts` sets `base: '/pageturn/'` to match the repo name (served from a subpath).
 
+## Mobile / PWA
+
+PageTurn is installable on iPhone and Android as a PWA (`vite-plugin-pwa` in `vite.config.ts`,
+manifest + icons in `public/`) — there is no separate native app or Capacitor wrapper. On iOS,
+"installed" means Safari → Share → Add to Home Screen; there's no App Store listing.
+
+- `src/components/layout/Layout.tsx` / `Navbar.tsx` / `Sidebar.tsx` hold the responsive shell: a
+  hamburger-triggered slide-in drawer below the `md` breakpoint, an always-visible sidebar above
+  it. State lives in `Layout` and is passed down — there's no nav context.
+- **A flex item with no explicit `min-w-0` takes its automatic min-width from the min-content size
+  of its descendants — including ones nested many levels deep with their own `overflow-x-auto`.**
+  Hit this for real: a `whitespace-nowrap` filter-tab row buried inside `Library.tsx` bubbled all
+  the way up through `main` (a `flex-1` item with no `min-w-0`) and forced the *entire page* 23px
+  wider than the viewport, breaking every mobile layout at once — not just the tab row itself.
+  `overflow-x-auto` + `min-w-0` on the overflowing element alone did NOT fix it; the fix was adding
+  `min-w-0` to `main` in `Layout.tsx`, the flex item actually responsible for capping page width.
+  Any new fixed-width-content-in-a-row pattern (tab pills, chip lists) needs `overflow-x-auto
+  max-w-full whitespace-nowrap` on the row itself — check for this bug with
+  `document.documentElement.scrollWidth` vs `clientWidth` at a mobile viewport, not by eyeballing
+  a screenshot (the drift is easy to miss visually since everything scales together).
+- The fixed navbar height is `var(--header-h)` (`src/index.css`), not a plain Tailwind `h-16` —
+  it adds `env(safe-area-inset-top)` so the bar clears the iOS notch/status bar when installed
+  standalone (`apple-mobile-web-app-status-bar-style: black-translucent` in `index.html`). The
+  sidebar and main content offset from that same variable — don't reintroduce a hardcoded `top-16`
+  / `mt-16` for these three, or they'll drift out of sync with the header again.
+
 ## Database migrations
 
 `docs/DATABASE_SCHEMA.sql` is for a **brand-new** Supabase project only — it cannot be safely

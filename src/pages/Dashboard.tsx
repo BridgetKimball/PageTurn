@@ -164,12 +164,12 @@ export function Dashboard() {
 
       {/* Stats row */}
       <div className="space-y-3">
-        <div className="flex rounded-lg border border-parchment-200 bg-white overflow-hidden w-fit">
+        <div className="flex rounded-lg border border-parchment-200 bg-white overflow-x-auto max-w-full">
           {(['month', 'year'] as const).map((p) => (
             <button
               key={p}
               onClick={() => setStatsPeriod(p)}
-              className={`px-4 py-2 text-sm font-medium transition-colors
+              className={`px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap
                 ${statsPeriod === p ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-parchment-50'}`}
             >
               {p === 'month' ? 'This Month' : 'This Year'}

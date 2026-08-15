@@ -246,8 +246,8 @@ export function BookDetail() {
 
       <div className="bg-white rounded-2xl border border-parchment-200 overflow-hidden">
         {/* Header */}
-        <div className="flex gap-6 p-6">
-          <div className="flex-shrink-0">
+        <div className="flex flex-col sm:flex-row gap-6 p-6">
+          <div className="flex-shrink-0 mx-auto sm:mx-0">
             {book.cover_url ? (
               <img src={book.cover_url} alt={book.title} className="w-36 rounded-xl shadow-md object-cover" />
             ) : (
@@ -256,17 +256,17 @@ export function BookDetail() {
               </div>
             )}
           </div>
-          <div className="flex-1">
-            <h1 className="text-2xl font-bold font-serif text-gray-900 mb-1">{book.title}</h1>
-            <p className="text-gray-500 mb-3">{book.authors.join(', ')}</p>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl font-bold font-serif text-gray-900 mb-1 text-center sm:text-left">{book.title}</h1>
+            <p className="text-gray-500 mb-3 text-center sm:text-left">{book.authors.join(', ')}</p>
 
-            <div className="flex flex-wrap gap-2 mb-4">
+            <div className="flex flex-wrap gap-2 mb-4 justify-center sm:justify-start">
               {book.genres.slice(0, 4).map((g) => (
                 <Badge key={g}>{g}</Badge>
               ))}
             </div>
 
-            <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-4">
+            <div className="flex flex-wrap gap-4 text-sm text-gray-500 mb-4 justify-center sm:justify-start">
               {book.page_count && <span>{book.page_count} pages</span>}
               {book.published_date && <span>{book.published_date.slice(0, 4)}</span>}
               {book.publisher && <span>{book.publisher}</span>}
@@ -274,7 +274,7 @@ export function BookDetail() {
 
             {userBook ? (
               <div className="space-y-3">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3">
                   <Badge variant={userBook.status === 'read' ? 'default' : userBook.status === 'reading' ? 'success' : 'info'}>
                     {STATUS_LABELS[userBook.status]}
                   </Badge>
@@ -432,7 +432,7 @@ export function BookDetail() {
                           setShowSessionModal(true)
                         }}
                         title="Edit session"
-                        className="text-gray-300 hover:text-primary-600 transition-colors opacity-0 group-hover:opacity-100"
+                        className="text-gray-300 hover:text-primary-600 transition-colors md:opacity-0 md:group-hover:opacity-100"
                       >
                         <Edit3 size={14} />
                       </button>
@@ -442,7 +442,7 @@ export function BookDetail() {
                         }}
                         disabled={deleteSession.isPending && deleteSession.variables === s.id}
                         title="Delete session"
-                        className="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                        className="text-gray-300 hover:text-red-500 transition-colors md:opacity-0 md:group-hover:opacity-100 disabled:opacity-50"
                       >
                         <Trash2 size={14} />
                       </button>

@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* Installed as a PWA with a translucent iOS status bar, the fixed navbar
+     would otherwise render underneath the notch/status bar — pad it out by
+     the safe-area inset instead of a fixed height. */
+  --header-h: calc(4rem + env(safe-area-inset-top, 0px));
+}
+
 @layer base {
   * {
     box-sizing: border-box;
